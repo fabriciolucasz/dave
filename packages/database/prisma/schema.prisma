@@ -1,0 +1,227 @@
+// packages/database/prisma/schema.prisma
+//
+// PROPOSTA de schema para o Dave — ainda não incorporada ao repositório do
+// projeto. Autenticação do frontend é via Discord OAuth2 —
+// não guardamos senha nenhuma, só os dados retornados pelo Discord.
+//
+// Regra de acesso adotada (ver PLAN.md seção "Controle de acesso"):
+// qualquer membro com permissão ADMINISTRATOR (ou MANAGE_GUILD) no servidor
+// pode configurar e assinar o bot. Para manter rastreabilidade, toda ação
+// sensível grava quem fez (AuditLog) e toda assinatura grava quem criou
+// (Subscription.createdByUserId).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Usuários (autenticados via Discord OAuth2)
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String   @id @default(uuid())
+  discordId     String   @unique
+  username      String
+  discriminator String? // legado, discord não usa mais na maioria das contas
+  globalName    String? // "display name" novo do Discord
+  avatarHash    String?
+  email         String? // vem do escopo `email` do OAuth2, pode ser null se usuário negar o escopo
+
+  // tokens do OAuth2, usados para refresh de sessão e para buscar guilds do usuário
+  accessToken  String?
+  refreshToken String?
+  tokenExpiresAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ownedGuilds        Guild[]             @relation("GuildOwner")
+  memberships        GuildMember[]
+  createdSubscriptions Subscription[]    @relation("SubscriptionCreatedBy")
+  auditLogs          AuditLog[]
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Servidores (guilds) onde o bot está instalado
+// ---------------------------------------------------------------------------
+
+model Guild {
+  id        String  @id @default(uuid())
+  discordId String  @unique
+  name      String
+  iconHash  String?
+
+  // dono atual do servidor no Discord (pode não ter conta no nosso sistema ainda)
+  ownerDiscordId String
+  owner          User?  @relation("GuildOwner", fields: [ownerUserId], references: [id])
+  ownerUserId    String?
+
+  botAddedAt DateTime  @default(now())
+  botRemovedAt DateTime? // preenchido se o bot for removido/kickado, para histórico
+  isActive   Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members       GuildMember[]
+  subscriptions Subscription[]
+  auditLogs     AuditLog[]
+  settings      GuildSettings?
+
+  @@map("guilds")
+}
+
+// ---------------------------------------------------------------------------
+// Cache de "quem tem acesso a qual guild e com que permissão"
+// Evita bater no Discord toda vez que o dashboard carrega; sincronizado
+// no login e periodicamente.
+// ---------------------------------------------------------------------------
+
+model GuildMember {
+  id      String @id @default(uuid())
+  guildId String
+  userId  String
+
+  guild Guild @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // bitfield de permissões do discord (string pois é um BigInt serializado)
+  permissions String
+  isOwner     Boolean @default(false)
+  isAdmin     Boolean @default(false) // calculado a partir do bitfield, para query rápida
+
+  lastSyncedAt DateTime @default(now())
+
+  @@unique([guildId, userId])
+  @@index([userId])
+  @@map("guild_members")
+}
+
+// ---------------------------------------------------------------------------
+// Configurações do servidor (branding, prefixos, canais padrão, etc)
+// Separado da Guild para não inchar a tabela principal.
+// ---------------------------------------------------------------------------
+
+model GuildSettings {
+  id      String @id @default(uuid())
+  guildId String @unique
+  guild   Guild  @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  locale       String  @default("pt-BR")
+  embedColor   String? // cor padrão dos embeds/containers do servidor
+  logChannelId String? // canal onde o bot posta logs de ações administrativas
+
+  // JSON livre para configs específicas de módulos (economia, RP, moderação...)
+  // evita ter que migrar o schema toda vez que um módulo novo precisa de 1 config
+  data Json @default("{}")
+
+  updatedAt DateTime @updatedAt
+
+  @@map("guild_settings")
+}
+
+// ---------------------------------------------------------------------------
+// Planos disponíveis (catálogo)
+// ---------------------------------------------------------------------------
+
+model Plan {
+  id          String  @id @default(uuid())
+  code        String  @unique // ex: "free", "pro", "business"
+  name        String
+  priceCents  Int
+  currency    String  @default("BRL")
+  interval    BillingInterval @default(MONTHLY)
+  features    Json    // lista/flags de recursos liberados nesse plano
+  isActive    Boolean @default(true)
+
+  stripePriceId String? // id do price no Stripe, se aplicável
+
+  subscriptions Subscription[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("plans")
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+}
+
+// ---------------------------------------------------------------------------
+// Assinaturas — vinculadas à guild, não ao usuário.
+// Guardamos quem criou/gerencia por rastreabilidade e suporte.
+// ---------------------------------------------------------------------------
+
+model Subscription {
+  id      String @id @default(uuid())
+  guildId String
+  guild   Guild  @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  planId String
+  plan   Plan   @relation(fields: [planId], references: [id])
+
+  // usuário que assinou/paga atualmente — não necessariamente o dono do servidor
+  createdByUserId String
+  createdBy       User   @relation("SubscriptionCreatedBy", fields: [createdByUserId], references: [id])
+
+  status             SubscriptionStatus @default(ACTIVE)
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  canceledAt         DateTime?
+  cancelReason       String?
+
+  // integração com o provedor de pagamento
+  provider               PaymentProvider @default(STRIPE)
+  providerCustomerId     String? // ex: cus_xxx no Stripe
+  providerSubscriptionId String? @unique // ex: sub_xxx no Stripe
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([guildId, status])
+  @@map("subscriptions")
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+  TRIALING
+}
+
+enum PaymentProvider {
+  STRIPE
+  MERCADO_PAGO
+}
+
+// ---------------------------------------------------------------------------
+// Audit log — registra quem fez o quê. Essencial dado que múltiplos admins
+// podem configurar/assinar o mesmo servidor.
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id      String @id @default(uuid())
+  guildId String
+  guild   Guild  @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  action   String // ex: "subscription.created", "settings.updated", "member.kicked_bot"
+  metadata Json   @default("{}") // detalhes específicos da ação (diff de config, plano anterior, etc)
+
+  createdAt DateTime @default(now())
+
+  @@index([guildId, createdAt])
+  @@map("audit_logs")
+}

@@ -360,25 +360,25 @@ Copie `.env.example` para `.env` e preencha as variáveis antes de rodar `docker
 ## 14. Próximos Passos
 
 ### 14.1 REST API — Implementação dos Endpoints (Hono)
-- [ ] `GET /guilds/:guildId` — retorna configurações e status da guild
-- [ ] `POST /guilds/:guildId/setup` — salva canal e roles configurados
-- [ ] `GET /subscriptions/:guildId` — status da assinatura ativa
-- [ ] `POST /subscriptions/:guildId/checkout` — inicia fluxo de pagamento (MP primário, Stripe secundário)
-- [ ] `POST /subscriptions/:guildId/cancel` — cancela assinatura
-- [ ] `GET /users/me` — perfil do usuário autenticado via OAuth2
-- [ ] Middleware JWT nas rotas protegidas
-- [ ] Middleware `checkSubscription` bloqueando rotas premium sem assinatura ativa
+- [x] `GET /guilds/:guildId` — retorna configurações e status da guild
+- [x] `POST /guilds/:guildId/setup` — salva canal e roles configurados
+- [x] `GET /subscriptions/:guildId` — status da assinatura ativa
+- [x] `POST /subscriptions/:guildId/checkout` — inicia fluxo de pagamento (MP primário, Stripe secundário)
+- [x] `POST /subscriptions/:guildId/cancel` — cancela assinatura
+- [x] `GET /users/me` — perfil do usuário autenticado via OAuth2
+- [x] Middleware JWT nas rotas protegidas (Bearer/OAuth2)
+- [x] Middleware `checkSubscription` bloqueando rotas premium sem assinatura ativa
 
 ### 14.2 Containers Persistentes ("Sticky Messages")
-- [ ] Schema: tabela `guild_containers`
+- [x] Schema: tabela `guild_containers`
   - campos: `id`, `guildId`, `channelId`, `messageId?`, `type`, `payload (Json)`, `isActive`, `repostDelay (Int, default 30s)`
-- [ ] Comando `/container create` — serializa e envia o container no canal configurado, salva `messageId`
-- [ ] Listener `messageDelete` — verifica se o `messageId` deletado pertence a um container ativo, seta `messageId = null` e enfileira job
-- [ ] Job BullMQ com delay configurável — reenvia o container e atualiza `messageId`
-- [ ] Comando `/container disable` — seta `isActive = false`, encerra ciclo de repostagem
+- [x] Comando `/container create` — serializa e envia o container no canal configurado, salva `messageId`
+- [x] Listener `messageDelete` — verifica se o `messageId` deletado pertence a um container ativo, seta `messageId = null` e enfileira job
+- [x] Job BullMQ com delay configurável — reenvia o container e atualiza `messageId`
+- [x] Comando `/container disable` — seta `isActive = false`, encerra ciclo de repostagem
 
 ### 14.3 Onboarding / Ativação (Opção C — Híbrida)
-- [ ] Ver fluxo completo na seção 15
+- [x] Ver fluxo completo na seção 15 (implementado no `guildCreate` e slash commands `/setup`, `/assinar`)
 
 ### 14.4 Dashboard Frontend
 - [ ] Setup do app `dashboard` no Turborepo (Next.js)

@@ -1,0 +1,133 @@
+version: "3.9"
+
+# ---------------------------------------------------------------------------
+# Dave — infraestrutura de desenvolvimento local
+#
+# Serviços de infra (postgres, redis) sobem sempre.
+# Serviços da aplicação (gateway, bot-worker, api, billing-worker) usam
+# Dockerfiles próprios em cada app — ajuste os `build.context` conforme
+# for criando cada um. Comente os que ainda não existirem.
+# ---------------------------------------------------------------------------
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: dave-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dave}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dave}
+      POSTGRES_DB: ${POSTGRES_DB:-dave}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - dave_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dave}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: dave-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - dave_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # -------------------------------------------------------------------------
+  # Ferramentas de apoio (opcionais, úteis em dev)
+  # -------------------------------------------------------------------------
+
+  adminer:
+    image: adminer:latest
+    container_name: dave-adminer
+    restart: unless-stopped
+    ports:
+      - "${ADMINER_PORT:-8081}:8080"
+    depends_on:
+      - postgres
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: dave-redis-commander
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "${REDIS_COMMANDER_PORT:-8082}:8081"
+    depends_on:
+      - redis
+
+  # -------------------------------------------------------------------------
+  # Serviços da aplicação
+  # Descomente conforme forem sendo criados os Dockerfiles em cada app.
+  # -------------------------------------------------------------------------
+
+  gateway:
+    build:
+      context: .
+      dockerfile: apps/gateway/Dockerfile
+    container_name: dave-gateway
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  bot-worker:
+    build:
+      context: .
+      dockerfile: apps/bot-worker/Dockerfile
+    container_name: dave-bot-worker
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # deploy:
+    #   replicas: 2   # escala horizontal dos workers quando fizer sentido
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: dave-api
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${API_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  billing-worker:
+    build:
+      context: .
+      dockerfile: apps/billing-worker/Dockerfile
+    container_name: dave-billing-worker
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  dave_postgres_data:
+  dave_redis_data:

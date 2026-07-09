@@ -1,12 +1,13 @@
 import {
   Client,
   GatewayIntentBits,
+  Partials,
   type Interaction,
   InteractionType,
 } from 'discord.js';
-import { commandsQueue, interactionsQueue } from '@dave/queue';
+import { commandsQueue, interactionsQueue, containerRepostQueue, guildOnboardingQueue } from '@dave/queue';
 import { env } from '@dave/config';
-import type { CommandJobData, InteractionJobData } from '@dave/shared-types';
+import type { CommandJobData, InteractionJobData, ContainerRepostJobData, GuildOnboardingJobData } from '@dave/shared-types';
 
 // ---------------------------------------------------------------------------
 // shard.ts — o processo filho (shard) em si.
@@ -38,6 +39,7 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
   ],
+  partials: [Partials.Message, Partials.Channel],
   rest: {
     // Timeout REST mais curto no gateway — ele não executa comandos,
     // apenas publica na fila. Operações pesadas ficam no bot-worker.
@@ -102,6 +104,39 @@ client.on('interactionCreate', async (interaction: Interaction) => {
     }
   } catch (error) {
     console.error('[Gateway Shard] Erro ao enfileirar interação:', error);
+  }
+});
+
+client.on('guildCreate', async (guild) => {
+  console.log(`[Gateway Shard] Bot entrou em novo servidor: ${guild.name} (${guild.id})`);
+  try {
+    const jobData: GuildOnboardingJobData = {
+      type: 'guild_onboarding',
+      guildId: guild.id,
+      ownerDiscordId: guild.ownerId,
+      guildName: guild.name,
+    };
+    await guildOnboardingQueue.add(`onboarding:${guild.id}`, jobData);
+  } catch (error) {
+    console.error('[Gateway Shard] Erro ao enfileirar onboarding:', error);
+  }
+});
+
+client.on('messageDelete', async (message) => {
+  if (!message.guildId) return;
+
+  try {
+    const jobData: ContainerRepostJobData = {
+      type: 'container_repost',
+      containerId: '', // O bot-worker buscará por messageId no banco
+      guildId: message.guildId,
+      channelId: message.channelId,
+      delaySeconds: 30, // Delay padrão
+      messageId: message.id,
+    };
+    await containerRepostQueue.add(`delete:${message.id}`, jobData);
+  } catch (error) {
+    console.error('[Gateway Shard] Erro ao enfileirar messageDelete para container:', error);
   }
 });
 

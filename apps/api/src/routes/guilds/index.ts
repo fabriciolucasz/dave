@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { prisma, type Prisma } from '@dave/database';
 import { authMiddleware } from '../../middlewares/auth.js';
 import { containerRepostQueue } from '@dave/queue';
+import { env } from '@dave/config';
 
 // ---------------------------------------------------------------------------
 // routes/guilds/index.ts — CRUD de guilds e suas configurações
@@ -326,4 +327,61 @@ guildsRoutes.post('/:id/containers', async (c) => {
   });
 
   return c.json({ container });
+});
+
+/** Desativa um container persistente. */
+guildsRoutes.post('/:id/containers/:containerId/disable', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const containerId = c.req.param('containerId');
+
+  const membership = await prisma.guildMember.findFirst({
+    where: {
+      userId: user.id,
+      guild: { discordId: guildId },
+      isAdmin: true,
+    },
+  });
+
+  if (!membership) {
+    return c.json({ error: 'Guild não encontrada ou acesso negado.' }, 404);
+  }
+
+  const container = await prisma.guildContainer.findUnique({
+    where: { id: containerId },
+  });
+
+  if (!container || container.guildId !== membership.guildId) {
+    return c.json({ error: 'Container não encontrado.' }, 404);
+  }
+
+  // Desativa no banco
+  await prisma.guildContainer.update({
+    where: { id: containerId },
+    data: { isActive: false },
+  });
+
+  // Tenta apagar a mensagem no Discord via REST (silenciosamente)
+  if (container.messageId) {
+    try {
+      await fetch(`https://discord.com/api/v10/channels/${container.channelId}/messages/${container.messageId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bot ${env.DISCORD_TOKEN}` },
+      });
+    } catch (delErr) {
+      console.warn(`[API Container Disable] Falha ao deletar mensagem ${container.messageId}:`, delErr);
+    }
+  }
+
+  // Audit log
+  await prisma.auditLog.create({
+    data: {
+      guildId: membership.guildId,
+      userId: user.id,
+      action: 'container.api_disabled',
+      metadata: { containerId },
+    },
+  });
+
+  return c.json({ success: true });
 });

@@ -183,11 +183,9 @@ authRoutes.get('/callback', async (c) => {
     console.warn('[Auth] Erro ao sincronizar GuildMember:', syncErr);
   }
 
-  return c.json({
-    user,
-    accessToken: tokenData.access_token,
-    expiresAt: expiresAt.toISOString(),
-  });
+  return c.redirect(
+    `${env.FRONTEND_URL}/auth/callback?token=${tokenData.access_token}&expiresAt=${expiresAt.toISOString()}`
+  );
 });
 
 /** Retorna dados do usuário autenticado. */

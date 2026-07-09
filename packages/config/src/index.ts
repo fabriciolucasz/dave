@@ -17,6 +17,7 @@ const envSchema = z.object({
   // --- API ---
   API_PORT: z.coerce.number().int().positive().default(3000),
   API_BASE_URL: z.string().url().default('http://localhost:3000'),
+  FRONTEND_URL: z.string().url().default('http://localhost:3001'),
 
   // --- Discord ---
   DISCORD_TOKEN: z.string().min(1, 'DISCORD_TOKEN é obrigatório'),

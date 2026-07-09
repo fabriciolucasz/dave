@@ -1,6 +1,6 @@
 # PLAN.md — Dave (bot de Discord multi-tenant / mini SaaS para gestores de GTA RP)
 
-Este documento descreve a arquitetura do projeto. Itens marcados como concluídos na seção 13 (Próximos passos) refletem trabalho já implementado; o restante do documento descreve tanto decisões já tomadas quanto propostas de design. Serve como referência viva — atualize conforme o código evoluir.
+Este documento descreve a arquitetura do projeto. Itens marcados como concluídos na seção 13 refletem trabalho já implementado; o restante do documento descreve tanto decisões já tomadas quanto propostas de design. Serve como referência viva — atualize conforme o código evoluir.
 
 ## 1. Contexto e objetivo
 
@@ -132,7 +132,9 @@ dave/
 │   │       │   └── auth/
 │   │       ├── middlewares/
 │   │       └── index.ts
-│   └── billing-worker/       # webhooks Mercado Pago/Stripe, cron de expiração
+│   ├── billing-worker/       # webhooks Mercado Pago/Stripe, cron de expiração
+│   │   └── src/
+│   └── dashboard/            # frontend Next.js — ver seção 16
 │       └── src/
 ├── packages/
 │   ├── database/             # schema Prisma/Drizzle + client compartilhado
@@ -175,7 +177,7 @@ Para suportar centenas de botões/modais diferentes em um bot multi-tenant:
 
 ## 7. Sistema de criação de comandos (discord-kit)
 
-Proposta de função única `defineCommand()` para criar qualquer um dos três tipos de comando suportados pelo Discord/pelo bot, com o TypeScript inferindo os campos certos a partir do discriminador `type`. Arquivos propostos em `packages/discord-kit/src/commands/`: `types.ts`, `define-command.ts`, e um exemplo de uso.
+Função única `defineCommand()` para criar qualquer um dos três tipos de comando suportados pelo Discord/pelo bot, com o TypeScript inferindo os campos certos a partir do discriminador `type`. Arquivos em `packages/discord-kit/src/commands/`: `types.ts`, `define-command.ts`, e um exemplo de uso.
 
 ### 7.1 Tipos suportados
 
@@ -194,23 +196,21 @@ Proposta de função única `defineCommand()` para criar qualquer um dos três t
 ### 7.3 `CommandRegistry`
 
 - Separa o armazenamento por destino: `slashAndUserCommands` (vai para a API do Discord no boot) e `prefixCommands` (Map interno, incluindo aliases como chaves adicionais).
-- Exposto como singleton via módulo (`export const commandRegistry = new CommandRegistry()`) — segue o critério da seção 8: guarda estado real (comandos registrados) que precisa persistir entre chamadas, então é uma classe singleton, não uma função pura.
-- `getRegisterableCommands()` filtra só os comandos que precisam ser enviados à API do Discord — comandos `prefix` nunca passam por ali.
+- Exposto como singleton via módulo — segue o critério da seção 8: guarda estado real (comandos registrados) que precisa persistir entre chamadas, então é uma classe singleton, não uma função pura.
+- `getRegisterableCommands()` filtra só os comandos que precisam ser enviados à API do Discord — comandos `prefix` nunca passam por ali. `deploy-commands.ts` usa esse método como source of truth único.
 
 ## 8. Padrão de instanciação: quando usar classe/singleton vs função pura
 
-Critério adotado no projeto para decidir entre singleton, classe ou função pura — não é "usar classe ou não", é **"esse objeto representa um recurso caro/compartilhado, ou um valor que naturalmente muda a cada chamada?"**.
+Critério adotado no projeto: não é "usar classe ou não", é **"esse objeto representa um recurso caro/compartilhado, ou um valor que naturalmente muda a cada chamada?"**.
 
 | Tipo de coisa | Abordagem | Motivo |
 |---|---|---|
 | Client de banco (Prisma/Drizzle), Redis, BullMQ, `Client` do discord.js | **Singleton via módulo** | Recurso caro e único por processo — conexões não devem ser recriadas |
-| Embed/Container builders | Função que retorna instância nova a cada chamada | Conteúdo muda por interação; instância é barata e esperada. Compartilhar instância aqui gera estado mutável vazando entre comandos concorrentes |
+| Embed/Container builders | Função que retorna instância nova a cada chamada | Conteúdo muda por interação; instância é barata e esperada |
 | Router de `customId` / `CommandRegistry` | Classe singleton | Guarda estado real (mapa de handlers/comandos) que precisa persistir entre chamadas |
 | Handlers de comando | Funções puras (`async function execute(interaction) {}`) | Sem estado próprio, mais fácil de testar |
 
 ### 8.1 Singleton via módulo (operações vitais/essenciais)
-
-Para tudo que é **recurso caro e único por processo** — conexão com Postgres, client Redis, conexão do BullMQ, o `Client` do discord.js — o padrão adotado é **singleton via módulo**, não classe com `getInstance()`. Como módulos ES são cacheados pelo runtime, o arquivo só executa uma vez, não importa quantos lugares façam `import`:
 
 ```typescript
 // packages/database/src/client.ts
@@ -226,11 +226,7 @@ import { Redis } from 'ioredis';
 export const redis = new Redis(process.env.REDIS_URL!);
 ```
 
-Vantagens sobre singleton em classe: mais simples de testar (dá pra mockar o módulo inteiro), sem cerimônia de `getInstance()`, e o próprio runtime garante unicidade da instância.
-
 ### 8.2 Classe singleton (estado de configuração persistente)
-
-Quando o singleton precisa de **comportamento**, não só um valor exposto — por exemplo, o router de `customId` que mantém um mapa de handlers registrados — uma classe instanciada uma única vez e exportada faz sentido:
 
 ```typescript
 // packages/discord-kit/src/router.ts
@@ -249,15 +245,12 @@ class ComponentRouter {
   }
 }
 
-export const componentRouter = new ComponentRouter(); // uma única instância no processo todo
+export const componentRouter = new ComponentRouter();
 ```
 
 ### 8.3 Instância nova por chamada (builders e handlers)
 
-Para os builders (`embed.builder.ts`, `container.builder.ts`, `responder.builder.ts`) e handlers de comando, evitar classes/singleton — usar factory functions. O conteúdo de um embed muda a cada interação, então instanciar por chamada é esperado e barato; compartilhar uma instância aqui introduz estado mutável compartilhado, fonte comum de bugs em sistema concorrente (dois comandos rodando ao mesmo tempo podem vazar campos um pro outro se dividirem a mesma instância de builder):
-
 ```typescript
-// em vez de um serviço com estado, uma função pura que retorna instância nova
 export function successEmbed(title: string, description?: string) {
   return new EmbedBuilder().setColor(Colors.Green).setTitle(title).setDescription(description ?? null);
 }
@@ -265,198 +258,161 @@ export function successEmbed(title: string, description?: string) {
 
 ## 9. Sistema de paginação (discord-kit)
 
-Proposta de design para paginação eficiente de listagens (membros, logs de auditoria, etc.) usadas em embeds/containers. Arquivos propostos em `packages/discord-kit/src/pagination/`: `types.ts`, `paginator.ts`, e um exemplo de uso.
+Design para paginação eficiente de listagens (membros, logs de auditoria, etc.) usadas em embeds/containers.
 
 ### 9.1 Onde mora o estado da paginação
 
 Decisão: **stateless por padrão**, com sessão no Redis apenas quando necessário.
 
-- **Nunca guardar a lista inteira em memória** indexada por `messageId` — não escala entre múltiplas réplicas do `bot-worker` (que não compartilham memória) e vaza memória se a paginação nunca for usada até o fim.
-- **Página atual + query pequena viajam dentro do próprio `customId`** do botão (ex: `page:member-list:2:guild_123`). Isso é stateless: qualquer réplica do worker consegue responder o clique, mesmo depois de reiniciar ou sem ter sido a réplica que criou a mensagem.
-- **Sessão no Redis só quando a query é grande demais** para caber no limite de 100 caracteres do `customId` (ex: múltiplos filtros de data/ação em um log de auditoria). Nesse caso, o customId carrega apenas um id curto de sessão, com TTL curto (ex: 15 min).
+- **Nunca guardar a lista inteira em memória** indexada por `messageId`.
+- **Página atual + query pequena viajam dentro do próprio `customId`** do botão (ex: `page:member-list:2:guild_123`).
+- **Sessão no Redis só quando a query é grande demais** (múltiplos filtros), com id curto de sessão e TTL curto (ex: 15 min).
 
 ### 9.2 Busca de dados
 
-- `fetchPage(query, pageIndex, pageSize)` busca **só a página necessária**, nunca a lista inteira — paginação real no banco (`LIMIT`/`OFFSET` como ponto de partida; trocar por paginação por cursor se alguma tabela crescer para o ponto de `OFFSET` alto ficar caro).
-- `render(items, pageIndex, totalPages)` fica a cargo de quem usa o paginator — a mesma assinatura funciona tanto para retornar um `EmbedBuilder` (sistema antigo) quanto um `ContainerBuilder` (Components v2), então o paginator em si é agnóstico ao sistema visual usado.
+- `fetchPage(query, pageIndex, pageSize)` busca só a página necessária, nunca a lista inteira.
+- `render(items, pageIndex, totalPages)` é agnóstico ao sistema visual (Embed ou Container).
 
 ### 9.3 Interação com os botões
 
-- Botões padrão: primeira página / anterior / próxima / última — desabilitados automaticamente nos limites.
-- Clique sempre responde com `interaction.update()`, editando a mensagem existente em vez de criar uma nova (evita spam no canal).
-- Clamp defensivo do `pageIndex` recebido do customId — dados podem ter mudado (item deletado) entre um clique e outro, então nunca confiar cegamente no valor vindo do cliente.
-- Se a sessão no Redis expirar, o `deserializeQuery` lança um erro identificável (`PAGINATION_SESSION_EXPIRED`) para o responder decidir como avisar o usuário (ex: "essa listagem expirou, rode o comando novamente").
+- Botões padrão: primeira/anterior/próxima/última página, desabilitados nos limites.
+- `interaction.update()` edita a mensagem existente.
+- Clamp defensivo do `pageIndex`.
+- `PAGINATION_SESSION_EXPIRED` quando a sessão no Redis expira.
 
 ## 10. Controle de acesso e modelo de dados
 
 ### 10.1 Quem pode configurar e assinar o bot
 
-Decisão: **qualquer membro com permissão `ADMINISTRATOR` (ou `MANAGE_GUILD`) no servidor pode adicionar, configurar e assinar o bot** — não travado só no dono do servidor. Segue o mesmo padrão de bots consolidados no mercado (MEE6, Dyno, Ticket Tool).
+Decisão: **qualquer membro com permissão `ADMINISTRATOR` (ou `MANAGE_GUILD`) no servidor pode adicionar, configurar e assinar o bot** — não travado só no dono do servidor.
 
 Motivos:
-- Na prática, donos de servidor de RP costumam delegar a gestão para uma equipe de staff/administradores. Travar no dono cria gargalo de suporte ("o dono sumiu, ninguém mexe no bot").
-- O próprio Discord resolve a autorização por nós: no login OAuth2, `GET /users/@me/guilds` retorna o campo `permissions` do usuário em cada servidor — basta checar o bit de `ADMINISTRATOR`/`MANAGE_GUILD`, sem reinventar um sistema de permissões próprio.
-- O risco real não é "quem pode configurar", é "quem é responsável pela cobrança". Por isso o modelo de dados sempre registra:
-  - quem criou/gerencia cada assinatura (`Subscription.createdByUserId`);
-  - quem fez cada ação sensível (`AuditLog`).
+- Delegação de gestão para staff é comum em servidores de RP.
+- O Discord já resolve a autorização via `GET /users/@me/guilds` (campo `permissions`).
+- O que importa rastrear não é "quem pode configurar", mas "quem é responsável pela cobrança" — por isso `Subscription.createdByUserId` e `AuditLog`.
 
 Implementado: `POST /subscriptions/:guildId/cancel` só permite o criador da assinatura ou o dono do servidor; outros admins recebem `403`.
 
 ### 10.2 Autenticação do frontend
 
-- Autenticação via **Discord OAuth2** — sem senha própria, sem gestão de credenciais.
-- Fluxo: usuário autoriza no Discord → recebemos `access_token`/`refresh_token` → usamos `GET /users/@me` (identidade) e `GET /users/@me/guilds` (lista de servidores + permissões) para montar a sessão.
-- `User.accessToken`/`refreshToken` ficam salvos para permitir re-sincronizar a lista de guilds/permissões sem forçar novo login a cada sessão.
+- Autenticação via **Discord OAuth2** — sem senha própria.
+- Fluxo: usuário autoriza no Discord → `access_token`/`refresh_token` → `GET /users/@me` + `GET /users/@me/guilds` para montar a sessão.
+- `User.accessToken`/`refreshToken` salvos para re-sincronizar sem forçar novo login.
 
 ### 10.3 Modelo de dados (`schema.prisma`)
 
-Entidades:
-
-- **`User`** — identidade vinda do Discord OAuth2 (`discordId`, `username`, `globalName`, `avatarHash`, `email` opcional, tokens de OAuth2).
-- **`Guild`** — servidor onde o bot está instalado. Guarda `ownerDiscordId` sempre (mesmo que o dono nunca tenha logado no dashboard) e, quando disponível, o vínculo com `User` via `ownerUserId`.
-- **`GuildMember`** — cache de "quem tem acesso a qual guild e com que permissão". Guarda o bitfield de permissões do Discord e um campo `isAdmin` já calculado, para consultas rápidas sem reprocessar o bitfield toda hora. Sincronizado no login e via cron semanal no `billing-worker`.
-- **`GuildSettings`** — configurações do servidor (locale, cor padrão de embed, canal de logs) separadas da tabela principal de `Guild`. Inclui um campo `data` em JSON livre para configs específicas de módulos (economia, RP, moderação) — validação a cargo de Zod na camada de API/bot.
-- **`Plan`** — catálogo de planos disponíveis (nome, preço, intervalo, features, id do price no provedor de pagamento).
-- **`Subscription`** — vinculada à `Guild`, não ao `User`. Registra `createdByUserId` (quem assinou/paga), status, período vigente e IDs do provedor de pagamento (`PaymentProvider`: Mercado Pago ou Stripe).
-- **`AuditLog`** — genérico (`action` + `metadata` em JSON), registra quem fez o quê em cada guild.
+- **`User`** — identidade do OAuth2 (`discordId`, `username`, `globalName`, `avatarHash`, `email` opcional, tokens).
+- **`Guild`** — servidor com o bot. Guarda `ownerDiscordId` sempre, e `ownerUserId` quando disponível.
+- **`GuildMember`** — cache de permissões por usuário/guild, com `isAdmin` calculado. Sincronizado no login e via cron semanal.
+- **`GuildSettings`** — locale, cor de embed, canal de logs, `data` em JSON livre para configs por módulo.
+- **`Plan`** — catálogo de planos.
+- **`Subscription`** — vinculada à `Guild`, registra `createdByUserId`, status, período, `PaymentProvider`.
+- **`AuditLog`** — `action` + `metadata` em JSON, quem fez o quê em cada guild.
 
 ## 11. Fluxo operacional de billing
 
-O modelo de dados de assinaturas está detalhado na seção 10.3 (`Plan`, `Subscription`).
-
-- `billing-worker` escuta webhooks do Mercado Pago (primário) e Stripe (secundário) e atualiza a tabela `subscriptions`.
-- Middleware de comando (`isPremium` no `CommandModule` + `checkSubscription`) verifica a assinatura antes de executar comandos premium:
-  - Resultado cacheado no Redis com TTL curto, para não bater no Postgres a cada interação.
-- Cron job diário (BullMQ *repeatable job*) varre assinaturas vencidas e aplica downgrade/bloqueio automaticamente.
-- Cron job semanal sincroniza `GuildMember` (permissões do Discord podem mudar sem aviso) via tipo de job `guild_sync` no `BillingJobData`.
+- `billing-worker` escuta webhooks do Mercado Pago (primário) e Stripe (secundário) e atualiza `subscriptions`.
+- Middleware `isPremium` no `CommandModule` + `checkSubscription` verifica assinatura antes de comandos premium, cacheado no Redis com TTL curto.
+- Cron diário (BullMQ *repeatable job*) varre assinaturas vencidas e aplica downgrade/bloqueio.
+- Cron semanal sincroniza `GuildMember` via tipo de job `guild_sync` no `BillingJobData`.
 
 ## 12. Infraestrutura local (Docker Compose)
 
-O `docker-compose.yml` contém:
-
-- **postgres** (16-alpine) com healthcheck e volume persistente.
-- **redis** (7-alpine, com append-only file) com healthcheck e volume persistente.
-- **adminer** — UI web para inspecionar o Postgres (porta padrão 8081).
-- **redis-commander** — UI web para inspecionar o Redis (porta padrão 8082).
+- **postgres** (16-alpine), healthcheck, volume persistente.
+- **redis** (7-alpine, append-only), healthcheck, volume persistente.
+- **adminer** (porta 8081) e **redis-commander** (porta 8082).
 - Serviços da aplicação (`gateway`, `bot-worker`, `api`, `billing-worker`) com Dockerfiles criados.
 
 Copie `.env.example` para `.env` e preencha as variáveis antes de rodar `docker compose up`.
 
-## 13. Concluido
+## 13. Concluído
 
-- [x] Criar o schema do banco (Prisma) para `users`, `guilds`, `guild_members`, `guild_settings`, `plans`, `subscriptions`, `audit_logs`.
-- [x] Implementar fluxo de login via Discord OAuth2 (troca de code por token, criação/atualização de `User`, sync inicial de `GuildMember`).
-- [x] Implementar job de sincronização periódica de `GuildMember` — cron semanal no `billing-worker` + tipo `guild_sync` no `BillingJobData`.
-- [x] Implementar `packages/discord-kit` (embed/container/responder builders).
-- [x] Implementar router de `customId` para interações.
-- [x] Criar Dockerfiles de cada app (`gateway`, `bot-worker`, `api`, `billing-worker`).
-- [x] Definir provedor de pagamento — **Mercado Pago** como primário, Stripe como secundário. Ambos implementados no `billing-worker`.
-- [x] Definir middleware de verificação de assinatura nos comandos premium — campo `isPremium` no `CommandModule` + `checkSubscription`.
-- [x] Especificar contratos da REST API — documentação completa em `api-contracts.md`.
+- [x] Schema do banco (Prisma) para `users`, `guilds`, `guild_members`, `guild_settings`, `plans`, `subscriptions`, `audit_logs`.
+- [x] Fluxo de login via Discord OAuth2 (troca de code por token, criação/atualização de `User`, sync inicial de `GuildMember`).
+- [x] Job de sincronização periódica de `GuildMember` — cron semanal no `billing-worker` + tipo `guild_sync` no `BillingJobData`.
+- [x] `packages/discord-kit` (embed/container/responder builders).
+- [x] Router de `customId` para interações.
+- [x] Dockerfiles de cada app (`gateway`, `bot-worker`, `api`, `billing-worker`).
+- [x] Provedor de pagamento — **Mercado Pago** primário, Stripe secundário. Ambos implementados no `billing-worker`.
+- [x] Middleware de verificação de assinatura nos comandos premium — campo `isPremium` no `CommandModule` + `checkSubscription`.
+- [x] Contratos da REST API — documentação completa em `api-contracts.md`.
 - [x] Trava de cancelamento — `POST /subscriptions/:guildId/cancel` só permite criador da assinatura ou dono do servidor; outros admins recebem `403`.
-- [x] Implementar sistema de paginação (`packages/discord-kit/src/pagination`) — `Paginator`, `PaginationSessionExpiredError`, `PagerOptions`, `PaginationResult` exportados pelo discord-kit.
-- [x] Implementar sistema de criação de comandos (`packages/discord-kit/src/commands`) — `defineCommand()`, `CommandRegistry` (singleton), `commandRegistry`. Suporte a slash, user e prefix commands. `deploy-commands.ts` usa `commandRegistry.getRegisterableCommands()` como source of truth único.
+- [x] Sistema de paginação (`packages/discord-kit/src/pagination`) — `Paginator`, `PaginationSessionExpiredError`, `PagerOptions`, `PaginationResult`.
+- [x] Sistema de criação de comandos (`packages/discord-kit/src/commands`) — `defineCommand()`, `CommandRegistry` (singleton), `commandRegistry`. Suporte a slash, user e prefix commands. `deploy-commands.ts` usa `commandRegistry.getRegisterableCommands()` como source of truth único.
+- [x] REST API — endpoints principais (`/guilds/:guildId`, `/guilds/:guildId/setup`, `/subscriptions/:guildId`, `/subscriptions/:guildId/checkout`, `/subscriptions/:guildId/cancel`, `/users/me`), middleware JWT e `checkSubscription`.
+- [x] Containers persistentes ("sticky messages") — schema `guild_containers`, comandos `/container create`/`disable`, listener `messageDelete`, job BullMQ de repost com delay configurável.
+- [x] Fluxo de ativação híbrido (`guildCreate`, `/setup`, `/assinar`) — ver seção 15.
+- [x] Dashboard Frontend (Next.js App Router) — login OAuth2, switcher, overview, settings formulário, containers desativação, faturamento checkout/cancelamento e account profile.
 
-## 14. Próximos Passos
+## 14. Próximos passos
 
-### 14.1 REST API — Implementação dos Endpoints (Hono)
-- [x] `GET /guilds/:guildId` — retorna configurações e status da guild
-- [x] `POST /guilds/:guildId/setup` — salva canal e roles configurados
-- [x] `GET /subscriptions/:guildId` — status da assinatura ativa
-- [x] `POST /subscriptions/:guildId/checkout` — inicia fluxo de pagamento (MP primário, Stripe secundário)
-- [x] `POST /subscriptions/:guildId/cancel` — cancela assinatura
-- [x] `GET /users/me` — perfil do usuário autenticado via OAuth2
-- [x] Middleware JWT nas rotas protegidas (Bearer/OAuth2)
-- [x] Middleware `checkSubscription` bloqueando rotas premium sem assinatura ativa
-
-### 14.2 Containers Persistentes ("Sticky Messages")
-- [x] Schema: tabela `guild_containers`
-  - campos: `id`, `guildId`, `channelId`, `messageId?`, `type`, `payload (Json)`, `isActive`, `repostDelay (Int, default 30s)`
-- [x] Comando `/container create` — serializa e envia o container no canal configurado, salva `messageId`
-- [x] Listener `messageDelete` — verifica se o `messageId` deletado pertence a um container ativo, seta `messageId = null` e enfileira job
-- [x] Job BullMQ com delay configurável — reenvia o container e atualiza `messageId`
-- [x] Comando `/container disable` — seta `isActive = false`, encerra ciclo de repostagem
-
-### 14.3 Onboarding / Ativação (Opção C — Híbrida)
-- [x] Ver fluxo completo na seção 15 (implementado no `guildCreate` e slash commands `/setup`, `/assinar`)
-
-### 14.4 Dashboard Frontend
-- [ ] Setup do app `dashboard` no Turborepo (Next.js)
-- [ ] Login via Discord OAuth2
-- [ ] Tela de gerenciamento de guild (canal, roles, containers ativos)
-- [ ] Tela de assinatura (checkout, status, cancelamento)
-- [ ] Após dashboard pronto: adicionar link na DM de boas-vindas do `guildCreate`
-
-### 14.5 Pagamentos ao Vivo
+### 14.2 Pagamentos ao vivo
 - [ ] Configurar webhooks Mercado Pago em produção
 - [ ] Testar fluxo completo: checkout → pagamento → atualização de `Subscription`
 - [ ] Configurar webhooks Stripe (secundário)
 - [ ] Job de expiração automática de assinatura no `billing-worker`
 
----
-
 ## 15. Fluxo de Ativação do Bot (Opção C — Híbrida)
 
 ### Visão Geral
 
-Quando o bot entra em um servidor, ele inicia o onboarding via DM para o dono.
-O caminho principal é o Dashboard; o `/setup` no Discord é o fallback para quem prefere não sair do servidor.
-O acesso a funcionalidades premium é bloqueado pelo middleware `checkSubscription` enquanto não houver assinatura ativa.
+Quando o bot entra em um servidor, ele inicia o onboarding via DM para o dono. O caminho principal é o Dashboard; o `/setup` no Discord é o fallback para quem prefere não sair do servidor. O acesso a funcionalidades premium é bloqueado pelo middleware `checkSubscription` enquanto não houver assinatura ativa.
 
 ### 15.1 Evento `guildCreate`
 
-1. Bot entra no servidor
-2. Registra a guild no banco (`Guild` + `GuildSettings` com defaults)
-3. Tenta enviar DM ao dono com embed de boas-vindas (branding neutro do dave)
-4. Se DM falhar (DMs fechadas): envia mensagem no primeiro canal de texto disponível com permissão
-
-**Embed de boas-vindas (estrutura):**
-[dave]
-Olá! O dave foi adicionado ao servidor {guildName}.
-Para começar, configure o canal e as roles de acesso usando o comando abaixo
-diretamente no seu servidor:
-/setup
-Após a configuração, funcionalidades premium estarão disponíveis mediante assinatura.
-
-> Link do dashboard omitido até o frontend estar pronto.
+1. Bot entra no servidor.
+2. Registra a guild no banco (`Guild` + `GuildSettings` com defaults).
+3. Tenta enviar DM ao dono com embed de boas-vindas.
+4. Se DM falhar: envia mensagem no primeiro canal de texto disponível com permissão.
 
 ### 15.2 Comando `/setup` (wizard no Discord)
 
-Fluxo em etapas via componentes interativos:
-
-**Etapa 1 — Canal**
-- Select menu com os canais de texto disponíveis no servidor
-- Salva `GuildSettings.defaultChannelId`
-
-**Etapa 2 — Roles de acesso**
-- Select menu (multi-select) com as roles do servidor
-- Define quais roles têm permissão para interagir com o bot
-- Salva `GuildSettings.allowedRoleIds`
-
-**Etapa 3 — Confirmação**
-- Embed resumindo canal + roles selecionados
-- Botão "Confirmar" → salva no banco e exibe próximos passos
-- Botão "Refazer" → reinicia o wizard
-
-**Mensagem pós-setup:**
-✅ Configuração concluída!
-Canal: #{canal}
-Roles: @role1, @role2
-Para acessar funcionalidades premium, assine um plano com /assinar.
+- **Etapa 1 — Canal**: select menu com canais de texto, salva `GuildSettings.defaultChannelId`.
+- **Etapa 2 — Roles de acesso**: select menu multi-select, salva `GuildSettings.allowedRoleIds`.
+- **Etapa 3 — Confirmação**: embed resumindo, botões "Confirmar"/"Refazer".
 
 ### 15.3 Middleware de Assinatura
 
-- Todas as rotas/comandos premium passam pelo `checkSubscription`
-- Se `Subscription.status !== 'active'` → bot responde com embed informando que é necessário assinar
-- `/setup` e `/assinar` são os únicos comandos liberados sem assinatura ativa
+- Rotas/comandos premium passam pelo `checkSubscription`.
+- `/setup` e `/assinar` são os únicos comandos liberados sem assinatura ativa.
 
 ### 15.4 Comando `/assinar`
 
-- Exibe os planos disponíveis (embed com botões por plano)
-- Ao clicar: gera link de checkout no `billing-worker` (Mercado Pago primário)
-- Após pagamento confirmado via webhook: `Subscription` atualizada, acesso liberado automaticamente
+- Exibe planos disponíveis (embed com botões).
+- Gera link de checkout no `billing-worker` (Mercado Pago primário).
+- Webhook confirma pagamento → `Subscription` atualizada, acesso liberado.
 
 ### 15.5 Re-setup
 
-- `/setup` pode ser rodado novamente a qualquer momento para alterar canal ou roles
-- Requer que o usuário tenha permissão de administrador no servidor
+- `/setup` pode ser rodado novamente a qualquer momento, requer permissão de administrador.
+
+## 16. Dashboard Frontend — Especificação de telas e UI
+
+A seção 14.1 lista o que falta implementar; esta seção detalha o **comportamento**, não só a existência de cada tela. Stack: Next.js (App Router), autenticado via Discord OAuth2 (seção 10.2), consumindo a REST API já implementada (seção 13).
+
+### 16.1 Modelo de navegação
+
+Um gestor pode ter acesso a múltiplos servidores — a navegação precisa refletir isso:
+
+- **Guild switcher** fixo no topo (dropdown com ícone + nome do servidor). Trocar o servidor selecionado muda o contexto de toda a navegação abaixo sem recarregar a página (client-side, mantendo a sessão).
+- **Sidebar lateral** com as seções por servidor: Visão geral, Configurações, Containers, Assinatura.
+- Se o usuário não tem acesso a nenhum servidor com o bot instalado, a sidebar não aparece — vai direto para a tela de "adicionar o bot".
+
+### 16.2 Telas
+
+| Rota | Propósito | Comportamento específico |
+|---|---|---|
+| `/login` | Autenticação | Só o botão "Continuar com Discord". Sem alternativa de senha/formulário. |
+| `/dashboard` | Roteamento pós-login | 1 servidor → redireciona direto para `overview`. Múltiplos → grade de cards (ícone, nome, badge de status: ativo / assinatura vencida / não configurado). Zero → tela de convite do bot (botão de link OAuth2 de instalação). |
+| `/dashboard/[guildId]/overview` | Home do servidor | Status da assinatura (badge), canal/roles configurados, contagem de containers ativos, atalhos para as outras telas. |
+| `/dashboard/[guildId]/settings` | Configuração | Espelha o wizard `/setup` do Discord como formulário: select de canal padrão, multi-select de roles permitidas. Salva via `POST /guilds/:guildId/setup` — mesmo endpoint usado pelo comando, então mudança aqui reflete no bot imediatamente. |
+| `/dashboard/[guildId]/containers` | Containers ativos | Tabela: tipo, canal, status ativo/inativo, botão de desativar. **Sem criação pelo dashboard na v1** — criação continua via `/container create` no Discord, evitando duplicar a lógica de renderização de container no frontend. |
+| `/dashboard/[guildId]/subscription` | Assinatura | Status do plano, data de renovação, botões Assinar/Trocar de plano/Cancelar. Botão de cancelar só fica habilitado se o usuário logado for o `createdByUserId` ou o dono do servidor (mesma regra do endpoint, seção 10.1) — outros admins veem o botão desabilitado com tooltip explicando o motivo. |
+| `/account` | Perfil | Dados vindos do Discord (avatar, username), sem campos editáveis — a fonte da verdade é o Discord. |
+
+### 16.3 Estados obrigatórios em toda tela
+
+- **Loading**: skeleton com o formato do conteúdo real da tela, não um spinner genérico.
+- **Vazio**: ex. zero containers → texto explicando como criar um pelo Discord, sem tratar como erro.
+- **Erro de permissão**: se a permissão do usuário mudou no Discord entre a sincronização e a ação, a API retorna `403` e a UI mostra "Sua permissão pode ter mudado, atualize a página" em vez de travar silenciosamente.
+- **Assinatura vencida**: banner persistente no topo do dashboard daquele servidor (não modal bloqueante), com CTA para renovar — espelha o princípio do `checkSubscription` do bot (seção 11), mas no dashboard bloqueia a ação equivalente com o banner em vez de recusar o comando.

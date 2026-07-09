@@ -1,7 +1,6 @@
 // packages/database/prisma/schema.prisma
 //
-// PROPOSTA de schema para o Dave — ainda não incorporada ao repositório do
-// projeto. Autenticação do frontend é via Discord OAuth2 —
+// Autenticação do frontend é via Discord OAuth2 —
 // não guardamos senha nenhuma, só os dados retornados pelo Discord.
 //
 // Regra de acesso adotada (ver PLAN.md seção "Controle de acesso"):
@@ -74,6 +73,7 @@ model Guild {
   subscriptions Subscription[]
   auditLogs     AuditLog[]
   settings      GuildSettings?
+  containers    GuildContainer[]
 
   @@map("guilds")
 }
@@ -117,6 +117,10 @@ model GuildSettings {
   locale       String  @default("pt-BR")
   embedColor   String? // cor padrão dos embeds/containers do servidor
   logChannelId String? // canal onde o bot posta logs de ações administrativas
+
+  // Setup via /setup wizard — canal e roles configurados pelo admin
+  defaultChannelId String?  // canal padrão para postagem do bot
+  allowedRoleIds   String[] // roles que têm permissão para interagir com o bot
 
   // JSON livre para configs específicas de módulos (economia, RP, moderação...)
   // evita ter que migrar o schema toda vez que um módulo novo precisa de 1 config
@@ -180,9 +184,9 @@ model Subscription {
   cancelReason       String?
 
   // integração com o provedor de pagamento
-  provider               PaymentProvider @default(STRIPE)
-  providerCustomerId     String? // ex: cus_xxx no Stripe
-  providerSubscriptionId String? @unique // ex: sub_xxx no Stripe
+  provider               PaymentProvider @default(MERCADO_PAGO)
+  providerCustomerId     String? // ex: customer_id no MP
+  providerSubscriptionId String? @unique // ex: preapproval_id no MP ou sub_xxx no Stripe
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -202,6 +206,36 @@ enum SubscriptionStatus {
 enum PaymentProvider {
   STRIPE
   MERCADO_PAGO
+}
+
+// ---------------------------------------------------------------------------
+// Containers persistentes ("Sticky Messages")
+// Mensagens/containers fixados num canal que são automaticamente repostados
+// quando deletados.
+// ---------------------------------------------------------------------------
+
+model GuildContainer {
+  id      String @id @default(uuid())
+  guildId String
+  guild   Guild  @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  channelId String  // canal onde o container está fixado
+  messageId String? // null quando a mensagem foi deletada, aguardando repost
+
+  // tipo semântico do container (ex: "rules", "welcome", "custom")
+  type    String
+  // payload serializado do container (estrutura de embeds/components v2)
+  payload Json
+
+  isActive    Boolean @default(true)
+  repostDelay Int     @default(30) // segundos de delay antes de repostar após delete
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([guildId, isActive])
+  @@index([messageId]) // lookup rápido no messageDelete
+  @@map("guild_containers")
 }
 
 // ---------------------------------------------------------------------------

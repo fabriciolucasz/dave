@@ -1,11 +1,13 @@
 import { Worker, type Job } from 'bullmq';
-import { REST, Routes, InteractionResponseType, MessageFlags } from 'discord.js';
+import { REST, Routes, InteractionResponseType, MessageFlags, PermissionsBitField } from 'discord.js';
 import { createRedisConnection, QUEUE_NAMES } from '@dave/queue';
 import { env } from '@dave/config';
-import type { CommandJobData, InteractionJobData } from '@dave/shared-types';
+import type { CommandJobData, InteractionJobData, ContainerRepostJobData, GuildOnboardingJobData } from '@dave/shared-types';
 import { dispatchCommand, isAlreadyAcknowledged } from './commands/index.js';
 import { registerInteractionHandlers, dispatchInteraction } from './interactions/router.js';
 import type { ComponentInteraction } from '@dave/discord-kit';
+import { handleGuildOnboarding } from './jobs/guild-onboarding.js';
+import { handleContainerRepost } from './jobs/container-repost.js';
 
 // ---------------------------------------------------------------------------
 // apps/bot-worker/src/index.ts — entry point do bot-worker
@@ -118,6 +120,48 @@ const interactionWorker = new Worker<InteractionJobData>(
 );
 
 // ---------------------------------------------------------------------------
+// Worker de onboarding de guilds
+// ---------------------------------------------------------------------------
+
+const onboardingWorker = new Worker<GuildOnboardingJobData>(
+  QUEUE_NAMES.GUILD_ONBOARDING,
+  async (job) => {
+    console.log(`[BotWorker] Processando onboarding da guild: ${job.data.guildName} (job ${job.id})`);
+    try {
+      await handleGuildOnboarding(job.data);
+    } catch (error) {
+      console.error(`[BotWorker] Erro ao processar onboarding para a guild ${job.data.guildId}:`, error);
+      throw error;
+    }
+  },
+  {
+    connection: createRedisConnection(),
+    concurrency: 5,
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Worker de repostagem de containers persistentes ("sticky messages")
+// ---------------------------------------------------------------------------
+
+const containerRepostWorker = new Worker<ContainerRepostJobData>(
+  QUEUE_NAMES.CONTAINER_REPOST,
+  async (job) => {
+    console.log(`[BotWorker] Processando repost de container: ${job.data.containerId || job.data.messageId} (job ${job.id})`);
+    try {
+      await handleContainerRepost(job.data);
+    } catch (error) {
+      console.error(`[BotWorker] Erro ao processar repost de container:`, error);
+      throw error;
+    }
+  },
+  {
+    connection: createRedisConnection(),
+    concurrency: 5,
+  },
+);
+
+// ---------------------------------------------------------------------------
 // buildInteractionProxy — proxy REST para responder interações sem WebSocket
 //
 // Cria um objeto que imita a interface de Interaction do discord.js,
@@ -167,7 +211,7 @@ function buildInteractionProxy(opts: ProxyOptions) {
           : 'unknown',
     },
     memberPermissions: opts.rawData['member']
-      ? (opts.rawData['member'] as Record<string, unknown>)['permissions']
+      ? new PermissionsBitField(BigInt((opts.rawData['member'] as Record<string, unknown>)['permissions'] as string))
       : null,
     // Métodos de resposta via REST
     async reply(options: Record<string, unknown>) {
@@ -229,6 +273,8 @@ process.on('SIGTERM', async () => {
   console.log('[BotWorker] SIGTERM recebido — fechando workers...');
   await commandWorker.close();
   await interactionWorker.close();
+  await onboardingWorker.close();
+  await containerRepostWorker.close();
   process.exit(0);
 });
 
@@ -236,6 +282,8 @@ process.on('SIGINT', async () => {
   console.log('[BotWorker] SIGINT recebido — fechando workers...');
   await commandWorker.close();
   await interactionWorker.close();
+  await onboardingWorker.close();
+  await containerRepostWorker.close();
   process.exit(0);
 });
 

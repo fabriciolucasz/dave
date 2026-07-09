@@ -60,6 +60,7 @@ try {
     console.log('[Deploy] ✅ Comandos registrados globalmente com sucesso.');
     console.log('[Deploy] ℹ️  O Discord pode demorar até 1 hora para propagar os comandos globais.');
   }
+  process.exit(0);
 } catch (error) {
   console.error('[Deploy] ❌ Erro ao registrar comandos:', error);
   process.exit(1);

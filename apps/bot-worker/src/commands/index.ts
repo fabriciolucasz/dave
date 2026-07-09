@@ -14,8 +14,14 @@ import { checkSubscription } from '../middleware/subscription.js';
 
 // --- Importa e registra todos os comandos ---
 import { pingCommand } from './ping.js';
+import { setupCommand } from './setup.js';
+import { assinarCommand } from './assinar.js';
+import { containerCommand } from './container.js';
 
 commandRegistry.register(pingCommand);
+commandRegistry.register(setupCommand);
+commandRegistry.register(assinarCommand);
+commandRegistry.register(containerCommand);
 
 console.log(
   `[CommandLoader] Registrados: slash=[${commandRegistry.getRegisteredSlashNames().join(', ')}]` +

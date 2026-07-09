@@ -11,6 +11,9 @@ import { componentRouter } from '@dave/discord-kit';
 // Padrão de customId: namespace:action:...payload
 // ---------------------------------------------------------------------------
 
+import { setupInteractionHandlers } from '../commands/setup.js';
+import { assinarInteractionHandlers } from '../commands/assinar.js';
+
 /**
  * Registra todos os handlers de componentes no componentRouter.
  * Chame uma única vez no bootstrap do bot-worker, antes de iniciar os workers.
@@ -20,16 +23,28 @@ import { componentRouter } from '@dave/discord-kit';
  * registerInteractionHandlers();
  */
 export function registerInteractionHandlers(): void {
-  // --- Exemplo: namespace "example" ---
-  // Descomente e adapte ao criar módulos reais.
-  //
-  // componentRouter.register('ticket', {
-  //   async close(interaction, [ticketId]) {
-  //     const responder = createResponder(interaction);
-  //     // lógica de fechar ticket...
-  //     await responder.send({ embeds: [successEmbed('Ticket fechado')] });
-  //   },
-  // });
+  // Registra as interações do assistente de configuração (/setup)
+  componentRouter.register('setup', {
+    async channel(interaction) {
+      await setupInteractionHandlers.handleChannelSelect(interaction);
+    },
+    async roles(interaction, payload) {
+      await setupInteractionHandlers.handleRolesSelect(interaction, payload);
+    },
+    async confirm(interaction, payload) {
+      await setupInteractionHandlers.handleConfirm(interaction, payload);
+    },
+    async refazer(interaction) {
+      await setupInteractionHandlers.handleRestart(interaction);
+    },
+  });
+
+  // Registra as interações do comando /assinar
+  componentRouter.register('assinar', {
+    async checkout(interaction, payload) {
+      await assinarInteractionHandlers.handleCheckout(interaction, payload);
+    },
+  });
 
   console.log(
     `[InteractionRouter] Handlers registrados: [${componentRouter.getRegisteredNamespaces().join(', ') || 'nenhum ainda'}]`,

@@ -1,0 +1,25 @@
+{
+  "name": "@dave/bot-worker",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --env-file=../../.env run --watch src/index.ts",
+    "start": "bun --env-file=../../.env run src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "deploy-commands": "bun --env-file=../../.env run src/scripts/deploy-commands.ts",
+    "deploy-commands:guild": "bun --env-file=../../.env run src/scripts/deploy-commands.ts --guild=$GUILD_ID"
+  },
+  "dependencies": {
+    "bullmq": "^5.8.4",
+    "discord.js": "^14.15.3",
+    "@dave/config": "workspace:*",
+    "@dave/database": "workspace:*",
+    "@dave/discord-kit": "workspace:*",
+    "@dave/queue": "workspace:*",
+    "@dave/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}

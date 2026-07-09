@@ -28,7 +28,7 @@ authRoutes.get('/authorize', (c) => {
 
   const url = `${DISCORD_AUTHORIZE_URL}?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=${scopes}`;
 
-  return c.json({ url });
+  return c.redirect(url);
 });
 
 /** Recebe o callback do Discord e troca o code pelo access_token. */

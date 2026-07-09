@@ -7,11 +7,12 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently --names \"API,BOT,GW,BILLING\" --prefix-colors \"cyan,green,yellow,magenta\" \"bun run dev:api\" \"bun run dev:bot-worker\" \"bun run dev:gateway\" \"bun run dev:billing-worker\"",
+    "dev": "concurrently --names \"API,BOT,GW,BILLING,DASH\" --prefix-colors \"cyan,green,yellow,magenta,blue\" \"bun run dev:api\" \"bun run dev:bot-worker\" \"bun run dev:gateway\" \"bun run dev:billing-worker\" \"bun run dev:dashboard\"",
     "dev:gateway": "bun --env-file=.env run --cwd apps/gateway dev",
     "dev:bot-worker": "bun --env-file=.env run --cwd apps/bot-worker dev",
     "dev:api": "bun --env-file=.env run --cwd apps/api dev",
     "dev:billing-worker": "bun --env-file=.env run --cwd apps/billing-worker dev",
+    "dev:dashboard": "bun --env-file=.env run --cwd apps/dashboard dev",
     "typecheck": "bun run --filter='*' typecheck",
     "db:generate": "bun run --cwd packages/database db:generate",
     "db:migrate": "bun run --cwd packages/database db:migrate",

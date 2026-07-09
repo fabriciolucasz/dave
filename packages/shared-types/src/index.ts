@@ -63,11 +63,32 @@ export interface BillingJobData {
   userId?: string;
 }
 
+export interface ContainerRepostJobData {
+  type: 'container_repost';
+  containerId: string;
+  guildId: string;
+  channelId: string;
+  delaySeconds: number;
+  messageId?: string;
+}
+
+export interface GuildOnboardingJobData {
+  type: 'guild_onboarding';
+  guildId: string;
+  ownerDiscordId: string;
+  guildName: string;
+}
+
 // ---------------------------------------------------------------------------
 // Union types úteis para narrowing nos workers
 // ---------------------------------------------------------------------------
 
-export type AnyJobData = CommandJobData | InteractionJobData | BillingJobData;
+export type AnyJobData =
+  | CommandJobData
+  | InteractionJobData
+  | BillingJobData
+  | ContainerRepostJobData
+  | GuildOnboardingJobData;
 
 // ---------------------------------------------------------------------------
 // Tipos de domínio compartilhados

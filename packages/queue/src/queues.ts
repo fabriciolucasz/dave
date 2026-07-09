@@ -1,5 +1,11 @@
 import { Queue } from 'bullmq';
-import type { CommandJobData, InteractionJobData, BillingJobData } from '@dave/shared-types';
+import type {
+  CommandJobData,
+  InteractionJobData,
+  BillingJobData,
+  ContainerRepostJobData,
+  GuildOnboardingJobData,
+} from '@dave/shared-types';
 import { env } from '@dave/config';
 
 // ---------------------------------------------------------------------------
@@ -10,6 +16,8 @@ export const QUEUE_NAMES = {
   COMMANDS: 'commands',
   INTERACTIONS: 'interactions',
   BILLING: 'billing',
+  CONTAINER_REPOST: 'container_repost',
+  GUILD_ONBOARDING: 'guild_onboarding',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
@@ -73,5 +81,27 @@ export const billingQueue = new Queue<BillingJobData>(QUEUE_NAMES.BILLING, {
     backoff: { type: 'exponential', delay: 2000 },
     removeOnComplete: { count: 500 },
     removeOnFail: { count: 5000 },
+  },
+});
+
+/** Fila de repostagem de containers persistentes ("sticky messages"). */
+export const containerRepostQueue = new Queue<ContainerRepostJobData>(QUEUE_NAMES.CONTAINER_REPOST, {
+  connection: makeConnection(),
+  defaultJobOptions: {
+    attempts: 5,
+    backoff: { type: 'exponential', delay: 2000 },
+    removeOnComplete: { count: 1000 },
+    removeOnFail: { count: 5000 },
+  },
+});
+
+/** Fila de onboarding de novas guilds (boas-vindas, criação inicial no DB). */
+export const guildOnboardingQueue = new Queue<GuildOnboardingJobData>(QUEUE_NAMES.GUILD_ONBOARDING, {
+  connection: makeConnection(),
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 5000 },
+    removeOnComplete: { count: 1000 },
+    removeOnFail: { count: 1000 },
   },
 });

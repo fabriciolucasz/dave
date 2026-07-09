@@ -51,10 +51,11 @@ export async function handleGuildOnboarding(data: GuildOnboardingJobData): Promi
   // 2. Tenta enviar DM ao dono com embed de boas-vindas
   const embed = infoEmbed(
     'Olá! O Dave foi adicionado ao seu servidor.',
-    `O bot **${guildName}** foi configurado com sucesso e está pronto para o onboarding.\n\n` +
-      `Para começar a utilizar, execute o comando de configuração diretamente no seu servidor:\n` +
+    `O bot **${guildName}** foi adicionado com sucesso e está pronto para ser configurado.\n\n` +
+      `🔗 **[Acessar Painel Web / Dashboard](http://localhost:3001)**\n\n` +
+      `Ou, se preferir, execute o comando de configuração diretamente no seu servidor:\n` +
       `**\`/setup\`**\n\n` +
-      `*A configuração inicial de canal e cargos permitidos é necessária para liberar o uso das funcionalidades.*`
+      `*A configuração inicial de canal de texto padrão e cargos autorizados é necessária para habilitar todas as funções do bot.*`
   );
 
   let dmSent = false;

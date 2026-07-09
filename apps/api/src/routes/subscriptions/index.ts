@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { prisma } from '@dave/database';
 import { authMiddleware } from '../../middlewares/auth.js';
 import { invalidateSubscriptionCache } from '@dave/queue';
+import { env } from '@dave/config';
 
 // ---------------------------------------------------------------------------
 // routes/subscriptions/index.ts — consulta e gestão de assinaturas
@@ -101,6 +102,99 @@ subscriptionsRoutes.get('/:guildId/history', async (c) => {
   });
 
   return c.json({ subscriptions });
+});
+
+/**
+ * Inicia o fluxo de pagamento para uma guild, criando a preferência no Mercado Pago.
+ *
+ * Corpo:
+ *   { "planId": "string" }
+ */
+subscriptionsRoutes.post('/:guildId/checkout', async (c) => {
+  const user = c.get('user');
+  const discordGuildId = c.req.param('guildId');
+
+  // Verifica se o usuário tem acesso à guild
+  const membership = await prisma.guildMember.findFirst({
+    where: {
+      userId: user.id,
+      guild: { discordId: discordGuildId },
+      isAdmin: true,
+    },
+    include: { guild: true },
+  });
+
+  if (!membership) {
+    return c.json({ error: 'Guild não encontrada ou acesso negado.' }, 404);
+  }
+
+  let body: { planId?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Corpo da requisição inválido.' }, 400);
+  }
+
+  const planId = body.planId;
+  if (!planId) {
+    return c.json({ error: 'Parâmetro planId é obrigatório.' }, 400);
+  }
+
+  const plan = await prisma.plan.findUnique({
+    where: { id: planId },
+  });
+
+  if (!plan || !plan.isActive) {
+    return c.json({ error: 'Plano não encontrado ou inativo.' }, 404);
+  }
+
+  // Busca o e-mail do usuário no banco
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+  });
+  const payerEmail = dbUser?.email || 'payer@example.com';
+
+  // Cria a assinatura no Mercado Pago
+  const accessToken = env.MERCADO_PAGO_ACCESS_TOKEN;
+  if (!accessToken) {
+    return c.json({ error: 'Configuração do gateway de pagamento pendente.' }, 500);
+  }
+
+  try {
+    const mpResponse = await fetch('https://api.mercadopago.com/preapproval', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        back_url: `${env.API_BASE_URL}/subscriptions/callback`,
+        reason: `Assinatura Dave - Plano ${plan.name}`,
+        external_reference: `${membership.guild.discordId}:${plan.id}:${user.id}`,
+        auto_recurring: {
+          frequency: 1,
+          frequency_type: 'months',
+          transaction_amount: plan.priceCents / 100,
+          currency_id: 'BRL',
+        },
+        payer_email: payerEmail,
+        status: 'pending',
+      }),
+    });
+
+    if (!mpResponse.ok) {
+      const errDetails = await mpResponse.text();
+      console.error('[API Checkout] Erro do Mercado Pago:', errDetails);
+      throw new Error(`Mercado Pago retornou status ${mpResponse.status}`);
+    }
+
+    const mpData = (await mpResponse.json()) as { init_point: string };
+
+    return c.json({ checkoutUrl: mpData.init_point });
+  } catch (error: any) {
+    console.error('[API Checkout] Erro ao criar checkout:', error);
+    return c.json({ error: 'Erro ao gerar link de pagamento.' }, 500);
+  }
 });
 
 /**

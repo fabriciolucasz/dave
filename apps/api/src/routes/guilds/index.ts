@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { prisma, type Prisma } from '@dave/database';
 import { authMiddleware } from '../../middlewares/auth.js';
+import { containerRepostQueue } from '@dave/queue';
 
 // ---------------------------------------------------------------------------
 // routes/guilds/index.ts — CRUD de guilds e suas configurações
@@ -155,4 +156,174 @@ guildsRoutes.patch('/:id/settings', async (c) => {
   });
 
   return c.json({ settings });
+});
+
+/** Salva canal e roles configurados via setup. */
+guildsRoutes.post('/:id/setup', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+
+  const membership = await prisma.guildMember.findFirst({
+    where: {
+      userId: user.id,
+      guild: { discordId: guildId },
+      isAdmin: true,
+    },
+    include: { guild: true },
+  });
+
+  if (!membership) {
+    return c.json({ error: 'Guild não encontrada ou acesso negado.' }, 404);
+  }
+
+  type SetupBody = {
+    defaultChannelId?: string;
+    allowedRoleIds?: string[];
+  };
+
+  let body: SetupBody;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Corpo inválido.' }, 400);
+  }
+
+  const settings = await prisma.guildSettings.upsert({
+    where: { guildId: membership.guildId },
+    update: {
+      defaultChannelId: body.defaultChannelId ?? null,
+      allowedRoleIds: body.allowedRoleIds ?? [],
+    },
+    create: {
+      guildId: membership.guildId,
+      defaultChannelId: body.defaultChannelId ?? null,
+      allowedRoleIds: body.allowedRoleIds ?? [],
+    },
+  });
+
+  // Audit log
+  await prisma.auditLog.create({
+    data: {
+      guildId: membership.guildId,
+      userId: user.id,
+      action: 'setup.dashboard_completed',
+      metadata: body as any,
+    },
+  });
+
+  return c.json({ settings });
+});
+
+/** Lista os containers persistentes da guild. */
+guildsRoutes.get('/:id/containers', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+
+  const membership = await prisma.guildMember.findFirst({
+    where: {
+      userId: user.id,
+      guild: { discordId: guildId },
+      isAdmin: true,
+    },
+  });
+
+  if (!membership) {
+    return c.json({ error: 'Guild não encontrada ou acesso negado.' }, 404);
+  }
+
+  const containers = await prisma.guildContainer.findMany({
+    where: {
+      guildId: membership.guildId,
+      isActive: true,
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  return c.json({ containers });
+});
+
+/** Cria um novo container persistente via API (dashboard). */
+guildsRoutes.post('/:id/containers', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+
+  const membership = await prisma.guildMember.findFirst({
+    where: {
+      userId: user.id,
+      guild: { discordId: guildId },
+      isAdmin: true,
+    },
+    include: { guild: true },
+  });
+
+  if (!membership) {
+    return c.json({ error: 'Guild não encontrada ou acesso negado.' }, 404);
+  }
+
+  type ContainerBody = {
+    channelId: string;
+    type: string;
+    payload: Record<string, any>;
+    repostDelay?: number;
+  };
+
+  let body: ContainerBody;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Corpo inválido.' }, 400);
+  }
+
+  if (!body.channelId || !body.type || !body.payload) {
+    return c.json({ error: 'channelId, type e payload são obrigatórios.' }, 400);
+  }
+
+  // Desativa os anteriores do mesmo tipo e canal
+  await prisma.guildContainer.updateMany({
+    where: {
+      guildId: membership.guildId,
+      channelId: body.channelId,
+      type: body.type,
+      isActive: true,
+    },
+    data: { isActive: false },
+  });
+
+  // Salva no DB
+  const container = await prisma.guildContainer.create({
+    data: {
+      guildId: membership.guildId,
+      channelId: body.channelId,
+      type: body.type,
+      payload: body.payload,
+      isActive: true,
+      repostDelay: body.repostDelay ?? 30,
+      messageId: null, // O worker irá postar a mensagem real
+    },
+  });
+
+  // Registra no AuditLog
+  await prisma.auditLog.create({
+    data: {
+      guildId: membership.guildId,
+      userId: user.id,
+      action: 'container.api_created',
+      metadata: {
+        containerId: container.id,
+        type: body.type,
+        channelId: body.channelId,
+      },
+    },
+  });
+
+  // Enfileira o job de repostagem imediato para enviar o container
+  await containerRepostQueue.add(`repost:${container.id}`, {
+    type: 'container_repost',
+    containerId: container.id,
+    guildId: membership.guild.discordId,
+    channelId: body.channelId,
+    delaySeconds: body.repostDelay ?? 30,
+  });
+
+  return c.json({ container });
 });

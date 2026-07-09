@@ -5,6 +5,7 @@ import { guildsRoutes } from './routes/guilds/index.js';
 import { subscriptionsRoutes } from './routes/subscriptions/index.js';
 import { stripeWebhookRoutes } from './routes/webhooks/stripe.js';
 import { mercadoPagoWebhookRoutes } from './routes/webhooks/mercadopago.js';
+import { usersRoutes } from './routes/users/index.js';
 
 // ---------------------------------------------------------------------------
 // apps/api/src/index.ts — entry point da REST API
@@ -45,6 +46,7 @@ app.get('/health', (c) => {
 app.route('/auth', authRoutes);
 app.route('/guilds', guildsRoutes);
 app.route('/subscriptions', subscriptionsRoutes);
+app.route('/users', usersRoutes);
 // Webhooks não usam autenticação de usuário — segurança via assinatura do provedor
 app.route('/webhooks/mercadopago', mercadoPagoWebhookRoutes);
 app.route('/webhooks/stripe', stripeWebhookRoutes);

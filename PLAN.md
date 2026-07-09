@@ -342,7 +342,7 @@ O `docker-compose.yml` contém:
 
 Copie `.env.example` para `.env` e preencha as variáveis antes de rodar `docker compose up`.
 
-## 13. Próximos passos
+## 13. Concluido
 
 - [x] Criar o schema do banco (Prisma) para `users`, `guilds`, `guild_members`, `guild_settings`, `plans`, `subscriptions`, `audit_logs`.
 - [x] Implementar fluxo de login via Discord OAuth2 (troca de code por token, criação/atualização de `User`, sync inicial de `GuildMember`).
@@ -356,3 +356,107 @@ Copie `.env.example` para `.env` e preencha as variáveis antes de rodar `docker
 - [x] Trava de cancelamento — `POST /subscriptions/:guildId/cancel` só permite criador da assinatura ou dono do servidor; outros admins recebem `403`.
 - [x] Implementar sistema de paginação (`packages/discord-kit/src/pagination`) — `Paginator`, `PaginationSessionExpiredError`, `PagerOptions`, `PaginationResult` exportados pelo discord-kit.
 - [x] Implementar sistema de criação de comandos (`packages/discord-kit/src/commands`) — `defineCommand()`, `CommandRegistry` (singleton), `commandRegistry`. Suporte a slash, user e prefix commands. `deploy-commands.ts` usa `commandRegistry.getRegisterableCommands()` como source of truth único.
+
+## 14. Próximos Passos
+
+### 14.1 REST API — Implementação dos Endpoints (Hono)
+- [ ] `GET /guilds/:guildId` — retorna configurações e status da guild
+- [ ] `POST /guilds/:guildId/setup` — salva canal e roles configurados
+- [ ] `GET /subscriptions/:guildId` — status da assinatura ativa
+- [ ] `POST /subscriptions/:guildId/checkout` — inicia fluxo de pagamento (MP primário, Stripe secundário)
+- [ ] `POST /subscriptions/:guildId/cancel` — cancela assinatura
+- [ ] `GET /users/me` — perfil do usuário autenticado via OAuth2
+- [ ] Middleware JWT nas rotas protegidas
+- [ ] Middleware `checkSubscription` bloqueando rotas premium sem assinatura ativa
+
+### 14.2 Containers Persistentes ("Sticky Messages")
+- [ ] Schema: tabela `guild_containers`
+  - campos: `id`, `guildId`, `channelId`, `messageId?`, `type`, `payload (Json)`, `isActive`, `repostDelay (Int, default 30s)`
+- [ ] Comando `/container create` — serializa e envia o container no canal configurado, salva `messageId`
+- [ ] Listener `messageDelete` — verifica se o `messageId` deletado pertence a um container ativo, seta `messageId = null` e enfileira job
+- [ ] Job BullMQ com delay configurável — reenvia o container e atualiza `messageId`
+- [ ] Comando `/container disable` — seta `isActive = false`, encerra ciclo de repostagem
+
+### 14.3 Onboarding / Ativação (Opção C — Híbrida)
+- [ ] Ver fluxo completo na seção 15
+
+### 14.4 Dashboard Frontend
+- [ ] Setup do app `dashboard` no Turborepo (Next.js)
+- [ ] Login via Discord OAuth2
+- [ ] Tela de gerenciamento de guild (canal, roles, containers ativos)
+- [ ] Tela de assinatura (checkout, status, cancelamento)
+- [ ] Após dashboard pronto: adicionar link na DM de boas-vindas do `guildCreate`
+
+### 14.5 Pagamentos ao Vivo
+- [ ] Configurar webhooks Mercado Pago em produção
+- [ ] Testar fluxo completo: checkout → pagamento → atualização de `Subscription`
+- [ ] Configurar webhooks Stripe (secundário)
+- [ ] Job de expiração automática de assinatura no `billing-worker`
+
+---
+
+## 15. Fluxo de Ativação do Bot (Opção C — Híbrida)
+
+### Visão Geral
+
+Quando o bot entra em um servidor, ele inicia o onboarding via DM para o dono.
+O caminho principal é o Dashboard; o `/setup` no Discord é o fallback para quem prefere não sair do servidor.
+O acesso a funcionalidades premium é bloqueado pelo middleware `checkSubscription` enquanto não houver assinatura ativa.
+
+### 15.1 Evento `guildCreate`
+
+1. Bot entra no servidor
+2. Registra a guild no banco (`Guild` + `GuildSettings` com defaults)
+3. Tenta enviar DM ao dono com embed de boas-vindas (branding neutro do dave)
+4. Se DM falhar (DMs fechadas): envia mensagem no primeiro canal de texto disponível com permissão
+
+**Embed de boas-vindas (estrutura):**
+[dave]
+Olá! O dave foi adicionado ao servidor {guildName}.
+Para começar, configure o canal e as roles de acesso usando o comando abaixo
+diretamente no seu servidor:
+/setup
+Após a configuração, funcionalidades premium estarão disponíveis mediante assinatura.
+
+> Link do dashboard omitido até o frontend estar pronto.
+
+### 15.2 Comando `/setup` (wizard no Discord)
+
+Fluxo em etapas via componentes interativos:
+
+**Etapa 1 — Canal**
+- Select menu com os canais de texto disponíveis no servidor
+- Salva `GuildSettings.defaultChannelId`
+
+**Etapa 2 — Roles de acesso**
+- Select menu (multi-select) com as roles do servidor
+- Define quais roles têm permissão para interagir com o bot
+- Salva `GuildSettings.allowedRoleIds`
+
+**Etapa 3 — Confirmação**
+- Embed resumindo canal + roles selecionados
+- Botão "Confirmar" → salva no banco e exibe próximos passos
+- Botão "Refazer" → reinicia o wizard
+
+**Mensagem pós-setup:**
+✅ Configuração concluída!
+Canal: #{canal}
+Roles: @role1, @role2
+Para acessar funcionalidades premium, assine um plano com /assinar.
+
+### 15.3 Middleware de Assinatura
+
+- Todas as rotas/comandos premium passam pelo `checkSubscription`
+- Se `Subscription.status !== 'active'` → bot responde com embed informando que é necessário assinar
+- `/setup` e `/assinar` são os únicos comandos liberados sem assinatura ativa
+
+### 15.4 Comando `/assinar`
+
+- Exibe os planos disponíveis (embed com botões por plano)
+- Ao clicar: gera link de checkout no `billing-worker` (Mercado Pago primário)
+- Após pagamento confirmado via webhook: `Subscription` atualizada, acesso liberado automaticamente
+
+### 15.5 Re-setup
+
+- `/setup` pode ser rodado novamente a qualquer momento para alterar canal ou roles
+- Requer que o usuário tenha permissão de administrador no servidor

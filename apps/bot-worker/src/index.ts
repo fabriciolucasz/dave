@@ -221,6 +221,59 @@ function buildInteractionProxy(opts: ProxyOptions) {
       }
       return null;
     })(),
+    options: (() => {
+      const data = opts.rawData['data'] as Record<string, unknown> | undefined;
+      const optionsArray = data?.['options'] as any[] | undefined;
+
+      // Encontra se há um subcomando selecionado (type = 1 ou type = 2)
+      const subCommandOpt = optionsArray?.find((opt) => opt.type === 1 || opt.type === 2);
+
+      // Se houver subcomando, o array real de opções está aninhado dentro dele
+      const activeOptions = subCommandOpt ? (subCommandOpt.options as any[]) : optionsArray;
+
+      return {
+        getSubcommand: () => {
+          return subCommandOpt?.name ?? null;
+        },
+        getString: (name: string, required?: boolean) => {
+          const opt = activeOptions?.find((o) => o.name === name);
+          return (opt?.value as string) ?? null;
+        },
+        getChannel: (name: string) => {
+          const opt = activeOptions?.find((o) => o.name === name);
+          if (opt && opt.value) {
+            return { id: opt.value as string };
+          }
+          return null;
+        },
+        getRole: (name: string) => {
+          const opt = activeOptions?.find((o) => o.name === name);
+          if (opt && opt.value) {
+            return { id: opt.value as string };
+          }
+          return null;
+        },
+        getUser: (name: string) => {
+          const opt = activeOptions?.find((o) => o.name === name);
+          if (opt && opt.value) {
+            return { id: opt.value as string };
+          }
+          return null;
+        },
+        getInteger: (name: string) => {
+          const opt = activeOptions?.find((o) => o.name === name);
+          return opt?.value !== undefined ? Number(opt.value) : null;
+        },
+        getNumber: (name: string) => {
+          const opt = activeOptions?.find((o) => o.name === name);
+          return opt?.value !== undefined ? Number(opt.value) : null;
+        },
+        getBoolean: (name: string) => {
+          const opt = activeOptions?.find((o) => o.name === name);
+          return opt?.value !== undefined ? Boolean(opt.value) : null;
+        },
+      };
+    })(),
     // Métodos de resposta via REST
     async reply(options: Record<string, unknown>) {
       const flags = buildFlags(options);

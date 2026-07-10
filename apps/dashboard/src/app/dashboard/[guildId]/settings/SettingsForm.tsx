@@ -4,6 +4,8 @@
 import { useState } from 'react';
 import { saveGuildSettings } from './actions';
 
+import { CircleCheck, CircleAlert } from 'lucide-react';
+
 interface DiscordChannel {
   id: string;
   name: string;
@@ -69,8 +71,16 @@ export function SettingsForm({
             background: message.type === 'success' ? 'var(--success-bg)' : 'var(--danger-bg)',
             color: message.type === 'success' ? '#2ec46d' : '#f25c60',
             borderColor: message.type === 'success' ? 'rgba(35, 165, 90, 0.2)' : 'rgba(218, 55, 60, 0.2)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
           }}
         >
+          {message.type === 'success' ? (
+            <CircleCheck size={16} aria-hidden="true" />
+          ) : (
+            <CircleAlert size={16} aria-hidden="true" />
+          )}
           {message.text}
         </div>
       )}

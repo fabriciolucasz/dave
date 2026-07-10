@@ -42,10 +42,10 @@ export default async function SubscriptionPage({
   // 2. Busca perfil do usuário logado
   const { user } = await apiRequest<{ user: User }>('/users/me');
 
-  // 3. Busca planos ativos no catálogo
+  // 3. Busca planos ativos no catálogo público
   let plans: Plan[] = [];
   try {
-    const res = await apiRequest<{ plans: Plan[] }>('/subscriptions/plans/available');
+    const res = await apiRequest<{ plans: Plan[] }>('/plans');
     plans = res.plans;
   } catch (error) {
     console.error('[SubscriptionPage] Erro ao buscar planos no catálogo:', error);

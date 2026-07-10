@@ -1,6 +1,6 @@
-// apps/dashboard/src/app/dashboard/[guildId]/overview/page.tsx
 import { apiRequest } from '../../../../lib/api';
 import Link from 'next/link';
+import { CircleCheck, CircleAlert, Sparkles } from 'lucide-react';
 
 interface GuildSettings {
   defaultChannelId: string | null;
@@ -51,7 +51,15 @@ export default async function OverviewPage({
           <h3 style={styles.cardTitle}>Status de Configuração</h3>
           <div style={styles.statusRow}>
             <span className={`badge ${isConfigured ? 'badge-active' : 'badge-inactive'}`}>
-              {isConfigured ? 'Configurado' : 'Configuração Pendente'}
+              {isConfigured ? (
+                <>
+                  <CircleCheck size={12} aria-hidden="true" style={{ marginRight: '4px' }} /> Configurado
+                </>
+              ) : (
+                <>
+                  <CircleAlert size={12} aria-hidden="true" style={{ marginRight: '4px' }} /> Configuração Pendente
+                </>
+              )}
             </span>
           </div>
           <p style={styles.cardText}>
@@ -69,9 +77,13 @@ export default async function OverviewPage({
           <h3 style={styles.cardTitle}>Plano & Cobrança</h3>
           <div style={styles.statusRow}>
             {subscription ? (
-              <span className="badge badge-active">{subscription.plan.name}</span>
+              <span className="badge badge-active">
+                <Sparkles size={12} aria-hidden="true" style={{ marginRight: '4px' }} /> {subscription.plan.name}
+              </span>
             ) : (
-              <span className="badge badge-inactive">Nenhuma Assinatura</span>
+              <span className="badge badge-inactive">
+                <CircleAlert size={12} aria-hidden="true" style={{ marginRight: '4px' }} /> Nenhuma Assinatura
+              </span>
             )}
           </div>
           <p style={styles.cardText}>

@@ -71,3 +71,4 @@ export type {
   AnnouncementContainerPayload,
   ContainerPayload,
 } from './containers/types.js';
+export { buildContainerDiscordPayload } from './containers/renderer.js';

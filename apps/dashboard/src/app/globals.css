@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* apps/dashboard/src/app/globals.css */
 /* Core Design System para o Dashboard do Dave (Vanilla CSS Premium) */
 

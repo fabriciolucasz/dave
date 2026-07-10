@@ -13,7 +13,8 @@
     "@dave/config": "workspace:*",
     "@dave/database": "workspace:*",
     "@dave/queue": "workspace:*",
-    "@dave/shared-types": "workspace:*"
+    "@dave/shared-types": "workspace:*",
+    "@dave/discord-kit": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.5.4"

@@ -3,6 +3,7 @@ import { prisma, type Prisma } from '@dave/database';
 import { authMiddleware } from '../../middlewares/auth.js';
 import { containerRepostQueue } from '@dave/queue';
 import { env } from '@dave/config';
+import { buildContainerDiscordPayload } from '@dave/discord-kit';
 
 // ---------------------------------------------------------------------------
 // routes/guilds/index.ts — CRUD de guilds e suas configurações
@@ -327,6 +328,96 @@ guildsRoutes.post('/:id/containers', async (c) => {
   });
 
   return c.json({ container });
+});
+
+/** Retorna os tipos de containers/painéis disponíveis. */
+guildsRoutes.get('/:id/containers/types', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+
+  const membership = await prisma.guildMember.findFirst({
+    where: {
+      userId: user.id,
+      guild: { discordId: guildId },
+      isAdmin: true,
+    },
+  });
+
+  if (!membership) {
+    return c.json({ error: 'Guild não encontrada ou acesso negado.' }, 404);
+  }
+
+  const types = [
+    {
+      type: 'welcome',
+      name: 'Boas-vindas',
+      icon: 'Hand',
+      isSticky: false,
+      description: 'Mensagem de boas-vindas exibida quando um membro entra no servidor.',
+    },
+    {
+      type: 'ticket_panel',
+      name: 'Abertura de ticket',
+      icon: 'Ticket',
+      isSticky: true,
+      description: 'Painel com botão persistente para membros abrirem canais de suporte.',
+    },
+    {
+      type: 'rules_panel',
+      name: 'Regras do servidor',
+      icon: 'ScrollText',
+      isSticky: true,
+      description: 'Mensagem fixa com os termos e regras de convivência da guilda.',
+    },
+    {
+      type: 'verification_panel',
+      name: 'Verificação',
+      icon: 'ShieldCheck',
+      isSticky: true,
+      description: 'Painel para verificação inicial de novos membros.',
+    },
+    {
+      type: 'announcement',
+      name: 'Anúncio',
+      icon: 'Megaphone',
+      isSticky: false,
+      description: 'Mensagem de anúncio disparada sob demanda pela staff.',
+    },
+  ];
+
+  return c.json({ types });
+});
+
+/** Retorna a representação do container/painel renderizado em formato Discord (Preview). */
+guildsRoutes.post('/:id/containers/preview', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+
+  const membership = await prisma.guildMember.findFirst({
+    where: {
+      userId: user.id,
+      guild: { discordId: guildId },
+      isAdmin: true,
+    },
+  });
+
+  if (!membership) {
+    return c.json({ error: 'Guild não encontrada ou acesso negado.' }, 404);
+  }
+
+  let body: { payload?: any };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'Corpo inválido.' }, 400);
+  }
+
+  if (!body.payload) {
+    return c.json({ error: 'payload é obrigatório.' }, 400);
+  }
+
+  const rendered = buildContainerDiscordPayload(body.payload);
+  return c.json({ rendered });
 });
 
 /** Desativa um container persistente. */

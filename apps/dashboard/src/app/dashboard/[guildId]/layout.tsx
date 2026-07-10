@@ -4,6 +4,15 @@ import { apiRequest } from '../../../lib/api';
 import { GuildSwitcher } from '../../../components/GuildSwitcher';
 import { clearAuthSession } from '../../auth/actions';
 import Link from 'next/link';
+import {
+  LayoutDashboard,
+  Settings,
+  LayoutGrid,
+  CreditCard,
+  User,
+  CircleAlert,
+  TriangleAlert,
+} from 'lucide-react';
 
 interface Guild {
   id: string;
@@ -68,22 +77,22 @@ export default async function GuildLayout({
 
         <nav style={styles.nav}>
           <Link href={`/dashboard/${guildId}/overview`} style={styles.navLink}>
-            📊 Visão Geral
+            <LayoutDashboard size={16} aria-hidden="true" /> Visão Geral
           </Link>
           <Link href={`/dashboard/${guildId}/settings`} style={styles.navLink}>
-            ⚙️ Configurações
+            <Settings size={16} aria-hidden="true" /> Configurações
           </Link>
-          <Link href={`/dashboard/${guildId}/containers`} style={styles.navLink}>
-            📦 Containers
+          <Link href={`/dashboard/${guildId}/paineis`} style={styles.navLink}>
+            <LayoutGrid size={16} aria-hidden="true" /> Painéis
           </Link>
           <Link href={`/dashboard/${guildId}/subscription`} style={styles.navLink}>
-            💳 Assinatura
+            <CreditCard size={16} aria-hidden="true" /> Assinatura
           </Link>
         </nav>
 
         <div style={styles.sidebarFooter}>
           <Link href="/account" style={styles.accountLink}>
-            👤 Minha Conta
+            <User size={16} aria-hidden="true" /> Minha Conta
           </Link>
           <form action={clearAuthSession} style={{ width: '100%' }}>
             <button type="submit" className="btn btn-secondary" style={styles.logoutBtn}>
@@ -106,7 +115,7 @@ export default async function GuildLayout({
 
         {isExpired && (
           <div style={styles.expiredBanner} className="animate-fade-in">
-            ⚠️ Este servidor não possui uma assinatura Pro ativa. Alguns recursos premium podem estar bloqueados ou limitados.
+            <TriangleAlert size={16} aria-hidden="true" /> Este servidor não possui uma assinatura Pro ativa. Alguns recursos premium podem estar bloqueados ou limitados.
             <Link href={`/dashboard/${guildId}/subscription`} style={styles.bannerLink}>
               Assinar Pro
             </Link>

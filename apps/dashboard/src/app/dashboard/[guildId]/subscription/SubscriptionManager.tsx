@@ -3,6 +3,7 @@
 
 import { useState } from 'react';
 import { createCheckoutSession, cancelActiveSubscription } from './actions';
+import { Sparkles, CircleCheck, CircleAlert, Check, CreditCard, Power } from 'lucide-react';
 
 interface Plan {
   id: string;
@@ -77,11 +78,27 @@ export function SubscriptionManager({
     }
   };
 
+  const renderFeatureText = (key: string, val: any) => {
+    if (key === 'maxActiveContainers') {
+      return val === -1 ? 'Painéis Ilimitados' : `Máximo de ${val} Painel Ativo`;
+    }
+    if (key === 'customWebhookEnabled') {
+      return val ? 'Webhook Customizado (Identidade Própria)' : 'Sem Webhook Customizado';
+    }
+    if (key === 'queuePriority') {
+      return val ? 'Fila de Processamento Prioritária' : 'Fila de Processamento Normal';
+    }
+    if (key === 'maxBillingAdmins') {
+      return val === 1 ? '1 Administrador de Faturamento' : `Até ${val} Administradores de Faturamento`;
+    }
+    return `${key}: ${JSON.stringify(val)}`;
+  };
+
   return (
     <div style={styles.container} className="animate-fade-in">
       {error && (
         <div style={styles.alert} className="badge-inactive">
-          ❌ {error}
+          <CircleAlert size={16} aria-hidden="true" style={{ marginRight: '8px' }} /> {error}
         </div>
       )}
 
@@ -89,13 +106,17 @@ export function SubscriptionManager({
       {activeSubscription ? (
         <div style={styles.activeSubCard} className="card-glass">
           <div style={styles.subHeader}>
-            <span style={styles.badgeLabel}>Plano Ativo</span>
+            <span style={styles.badgeLabel}>
+              <Sparkles size={12} aria-hidden="true" style={{ marginRight: '4px' }} /> Plano Ativo
+            </span>
             <h2 style={styles.planName}>{activeSubscription.plan.name}</h2>
           </div>
           <div style={styles.subDetails}>
             <div style={styles.detailItem}>
               <span style={styles.detailLabel}>Status</span>
-              <span className="badge badge-active">{activeSubscription.status}</span>
+              <span className="badge badge-active">
+                <CircleCheck size={12} aria-hidden="true" style={{ marginRight: '4px' }} /> {activeSubscription.status}
+              </span>
             </div>
             <div style={styles.detailItem}>
               <span style={styles.detailLabel}>Renovação / Expiração</span>
@@ -113,12 +134,13 @@ export function SubscriptionManager({
                 className="btn btn-danger"
                 style={styles.actionBtn}
               >
+                <Power size={14} aria-hidden="true" style={{ marginRight: '6px' }} />
                 {canceling ? 'Cancelando...' : 'Cancelar Assinatura'}
               </button>
             ) : (
               <div style={styles.disabledBlock}>
                 <button disabled className="btn btn-danger" style={styles.actionBtn}>
-                  Cancelar Assinatura
+                  <Power size={14} aria-hidden="true" style={{ marginRight: '6px' }} /> Cancelar Assinatura
                 </button>
                 <p style={styles.disabledText}>
                   Apenas o criador da assinatura ou o dono do servidor têm permissão para cancelar.
@@ -138,7 +160,10 @@ export function SubscriptionManager({
           <div style={styles.plansGrid}>
             {plans.map((plan) => (
               <div key={plan.id} style={styles.planCard} className="card-glass">
-                <h4 style={styles.planTitle}>{plan.name}</h4>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {plan.code !== 'free' && <Sparkles size={16} style={{ color: '#ffc44f' }} />}
+                  <h4 style={styles.planTitle}>{plan.name}</h4>
+                </div>
                 <div style={styles.priceRow}>
                   <span style={styles.priceVal}>R$ {(plan.priceCents / 100).toFixed(2)}</span>
                   <span style={styles.priceUnit}>/ mês</span>
@@ -147,17 +172,26 @@ export function SubscriptionManager({
                   {plan.features &&
                     Object.entries(plan.features).map(([key, val]) => (
                       <div key={key} style={styles.featureItem}>
-                        ✔ {key}: {JSON.stringify(val)}
+                        <Check size={14} style={{ color: '#2ec46d', marginRight: '6px', display: 'inline' }} />
+                        {renderFeatureText(key, val)}
                       </div>
                     ))}
                 </div>
                 <button
                   onClick={() => handleSubscribe(plan.id)}
-                  disabled={loadingPlanId !== null}
+                  disabled={loadingPlanId !== null || plan.code === 'free'}
                   className="btn btn-primary"
                   style={styles.subscribeBtn}
                 >
-                  {loadingPlanId === plan.id ? 'Carregando...' : 'Assinar Agora'}
+                  {plan.code === 'free' ? (
+                    'Plano Inicial'
+                  ) : loadingPlanId === plan.id ? (
+                    'Carregando...'
+                  ) : (
+                    <>
+                      <CreditCard size={14} aria-hidden="true" style={{ marginRight: '6px' }} /> Assinar Agora
+                    </>
+                  )}
                 </button>
               </div>
             ))}

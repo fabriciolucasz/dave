@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { env } from '@dave/config';
+import { prisma } from '@dave/database';
 import { authRoutes } from './routes/auth/index.js';
 import { guildsRoutes } from './routes/guilds/index.js';
 import { subscriptionsRoutes } from './routes/subscriptions/index.js';
@@ -42,6 +43,14 @@ app.get('/health', (c) => {
 // ---------------------------------------------------------------------------
 // Rotas da API v1
 // ---------------------------------------------------------------------------
+
+app.get('/plans', async (c) => {
+  const plans = await prisma.plan.findMany({
+    where: { isActive: true },
+    orderBy: { priceCents: 'asc' },
+  });
+  return c.json({ plans });
+});
 
 app.route('/auth', authRoutes);
 app.route('/guilds', guildsRoutes);

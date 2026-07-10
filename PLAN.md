@@ -342,9 +342,20 @@ Copie `.env.example` para `.env` e preencha as variáveis antes de rodar `docker
 - [x] REST API — endpoints principais (`/guilds/:guildId`, `/guilds/:guildId/setup`, `/subscriptions/:guildId`, `/subscriptions/:guildId/checkout`, `/subscriptions/:guildId/cancel`, `/users/me`), middleware JWT e `checkSubscription`.
 - [x] Containers persistentes ("sticky messages") — schema `guild_containers`, comandos `/container create`/`disable`, listener `messageDelete`, job BullMQ de repost com delay configurável.
 - [x] Fluxo de ativação híbrido (`guildCreate`, `/setup`, `/assinar`) — ver seção 15.
-- [x] Dashboard Frontend (Next.js App Router) — login OAuth2, switcher, overview, settings formulário, containers desativação, faturamento checkout/cancelamento e account profile.
 
 ## 14. Próximos passos
+
+### 14.1 Dashboard Frontend
+- [ ] Setup do app `dashboard` no Turborepo (Next.js)
+- [ ] Login via Discord OAuth2
+- [ ] Guild switcher + tela `/dashboard` (grade de servidores / redirect direto / tela de convite) — ver seção 16.2
+- [ ] Tela `/dashboard/[guildId]/overview` — ver seção 16.2
+- [ ] Tela `/dashboard/[guildId]/settings` (espelha o `/setup` do Discord) — ver seção 16.2
+- [ ] Tela `/dashboard/[guildId]/containers` (somente leitura + desativar, sem criação pelo dashboard na v1) — ver seção 16.2
+- [ ] Tela `/dashboard/[guildId]/subscription` (checkout, status, cancelamento com trava de permissão) — ver seção 16.2
+- [ ] Tela `/account`
+- [ ] Estados de loading/vazio/erro de permissão/assinatura vencida em todas as telas — ver seção 16.3
+- [ ] Após dashboard pronto: adicionar link na DM de boas-vindas do `guildCreate`
 
 ### 14.2 Pagamentos ao vivo
 - [ ] Configurar webhooks Mercado Pago em produção
@@ -416,3 +427,75 @@ Um gestor pode ter acesso a múltiplos servidores — a navegação precisa refl
 - **Vazio**: ex. zero containers → texto explicando como criar um pelo Discord, sem tratar como erro.
 - **Erro de permissão**: se a permissão do usuário mudou no Discord entre a sincronização e a ação, a API retorna `403` e a UI mostra "Sua permissão pode ter mudado, atualize a página" em vez de travar silenciosamente.
 - **Assinatura vencida**: banner persistente no topo do dashboard daquele servidor (não modal bloqueante), com CTA para renovar — espelha o princípio do `checkSubscription` do bot (seção 11), mas no dashboard bloqueia a ação equivalente com o banner em vez de recusar o comando.
+
+
+## 17. Estratégia de monetização e planos
+
+### 17.1 Modelo: sem taxa de setup, freemium + trial + mensalidade
+
+Decisão: **não cobrar taxa de "desenvolvimento"/setup**. Apenas mensalidade (com opção anual com desconto), com um plano Free permanente e um trial temporário do Pro.
+
+Motivos:
+- O mercado de bots de Discord (MEE6, Dyno, Ticket Tool, Carl-bot) já treinou o gestor a esperar instalação gratuita. Uma taxa de entrada é uma barreira que os concorrentes diretos não têm.
+- Fricção de pagamento antes de qualquer valor entregue derruba conversão — o gestor ainda não viu o bot funcionando na prática.
+- O custo marginal de atender mais um servidor é ~zero (arquitetura multi-tenant, seção 3) — diferente de uma agência que cobra setup por trabalho manual por cliente. Não há custo por servidor a recuperar com taxa fixa.
+
+### 17.2 Estrutura de planos
+
+| | **Free** | **Pro** | **Business** |
+|---|---|---|---|
+| Preço | R$ 0 | mensal (valor a definir) | mensal, mais alto |
+| Containers ativos (identidade visual configurável) | 1 | Ilimitados | Ilimitados |
+| Webhook customizado (nome/avatar próprio no container) | ❌ | ✅ | ✅ |
+| Prioridade de fila (BullMQ) | ❌ | ❌ | ✅ |
+| Administradores de billing (quem pode gerenciar a assinatura) | 1 (quem assinou) | 1 | Vários |
+| Suporte | Comunidade | Padrão | Prioritário |
+
+Desconto para pagamento anual, oferecido de forma visível desde o primeiro contato com a tela de assinatura (`/dashboard/[guildId]/subscription`, seção 16.2) — comunidades de RP costumam arrecadar via vaquinha entre jogadores, então fechar o valor anual de uma vez facilita esse fluxo.
+
+Preço fixo por servidor (`Guild`), não por membro — consistente com o modelo atual de `Subscription` vinculada a `Guild`, e evita penalizar servidores grandes logo no início.
+
+### 17.3 Trial
+
+- **7 dias de acesso Pro completo**, ativado automaticamente no evento `guildCreate` (seção 15.1) — sem pedir cartão.
+- Ao expirar sem conversão, o middleware `checkSubscription` (seção 11) passa a tratar o servidor como Free — funcionalidades acima do limite Free ficam bloqueadas, não o bot inteiro.
+- É o principal gatilho de conversão: a staff já configurou e já depende do bot antes de ver qualquer cobrança.
+
+### 17.4 O que é "container" — reforço conceitual
+
+Importante para o desenho do dashboard (seção 16) e para o discurso de venda: **container não é uma ferramenta genérica de criar embeds do zero**. É uma **camada de identidade visual aplicada a uma função que já existe no bot** (ex: painel de ticket, mensagem de boas-vindas, outro módulo futuro). O gestor escolhe cor, texto, e opcionalmente um webhook customizado (nome/avatar próprio) — a função passa a ser renderizada com essa identidade de forma persistente, até ele alterar de novo.
+
+Isso já é modelado no schema atual (`guild_containers`, seção 13 — campos `type`, `payload`, `channelId`, `messageId`), onde `type` identifica *qual função* está sendo estilizada e `payload` guarda a configuração visual escolhida — não o conteúdo livre de um embed arbitrário.
+
+Implicações para o roadmap do dashboard (seção 16.2, tela `/dashboard/[guildId]/containers`): quando a criação/edição avançada for implementada ali (hoje limitada a desativar — v1), a UI deve deixar claro que o gestor está **personalizando a aparência de uma função existente**, não criando conteúdo novo do zero. Essa é a funcionalidade-bandeira do plano Pro — o gatilho de conversão mais forte do produto, mais relevante que qualquer limite numérico de comandos.
+
+### 17.5 Impacto no modelo de dados
+
+- `Subscription` (seção 10.3) precisa de um campo para diferenciar trial de assinatura paga — ex: `status: TRIALING` (já previsto no enum `SubscriptionStatus`) e um `trialEndsAt` na `Guild` ou na própria `Subscription`, preenchido automaticamente no `guildCreate`.
+- `Plan.features` (JSON já previsto no schema) passa a carregar os limites por plano descritos na tabela 17.2 (ex: `maxActiveContainers`, `customWebhookEnabled`, `queuePriority`) — o middleware `checkSubscription` e o limite de containers ativos leem daqui, evitando hardcode de regras de negócio no código do bot.
+
+## 18. Tipos de container e formato do payload
+
+Detalhamento da seção 17.4: quais funções do bot ganham a camada de identidade visual configurável, e o formato de dados de cada uma. Proposta em `packages/discord-kit/src/containers/types.ts`.
+
+### 18.1 Princípio de design
+
+O `payload` de um container guarda **apenas identidade visual** (título, descrição, cor, banner, webhook customizado) — nunca a lógica de negócio da função que ele estiliza. Ex: o container `ticket_panel` guarda o texto do botão, mas a categoria/permissão de quem pode abrir ticket continua vivendo na configuração própria daquela feature (`TicketConfig`, fora do container). Isso evita que o sistema de container vire, na prática, um builder de conteúdo genérico — ele é estritamente uma camada de estilo sobre funções que já existem.
+
+Toda `ContainerIdentity` compartilha os mesmos campos base (`title`, `description`, `accentColor`, `bannerUrl`, `customWebhook`), o que permite que o `container.builder.ts` (seção 6.2) renderize qualquer tipo com a mesma lógica de composição visual — só o conteúdo funcional específico varia por `type`.
+
+### 18.2 Tipos propostos (v1)
+
+| `type` | Função que estiliza | Sticky (via `guild_containers.repostDelay`)? | Campos próprios do payload |
+|---|---|---|---|
+| `welcome` | Mensagem de boas-vindas ao entrar no servidor | Não | `showMemberCount` |
+| `ticket_panel` | Painel de abertura de ticket/suporte | Sim | `buttonLabel` |
+| `rules_panel` | Painel fixo de regras do servidor | Sim | — (só identidade) |
+| `verification_panel` | Painel de verificação de entrada | Sim | `buttonLabel` |
+| `announcement` | Anúncio disparado sob demanda por staff | Não | `mentionRoleId` opcional |
+
+Lista não é exaustiva — novos `type` podem ser adicionados conforme novas funções do bot forem construídas; a união discriminada em `ContainerPayload` garante que cada novo tipo declare só os campos que fazem sentido pra ele.
+
+### 18.3 `customWebhook` — a feature-bandeira do plano pago
+
+Quando definido, o container é enviado via webhook do Discord com nome/avatar próprios, em vez de aparecer como o bot — é a funcionalidade citada na seção 17.2/17.4 como principal gatilho de conversão para o plano Pro. Ausência de `customWebhook` faz o container usar a identidade padrão do bot. O middleware `checkSubscription` (seção 11) e o limite de `Plan.features.customWebhookEnabled` (seção 17.5) decidem se esse campo pode ser preenchido para aquele servidor.

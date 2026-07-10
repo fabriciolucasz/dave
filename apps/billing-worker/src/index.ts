@@ -110,24 +110,71 @@ async function handleMercadoPagoWebhook(payload: unknown): Promise<void> {
 
     const canceledAt = mappedStatus === 'CANCELED' ? new Date() : null;
 
-    await prisma.subscription.updateMany({
+    // Encontra a assinatura existente ou cria uma nova
+    const existing = await prisma.subscription.findUnique({
       where: { providerSubscriptionId: preapprovalId },
-      data: {
-        status: mappedStatus as never,
-        currentPeriodStart: lastModified,
-        currentPeriodEnd: nextPaymentDate,
-        ...(canceledAt && { canceledAt }),
-      },
     });
 
-    // Invalida cache se tiver o external_reference (que deve ser o Discord Guild ID)
+    if (existing) {
+      await prisma.subscription.update({
+        where: { id: existing.id },
+        data: {
+          status: mappedStatus as never,
+          currentPeriodStart: lastModified,
+          currentPeriodEnd: nextPaymentDate,
+          ...(canceledAt && { canceledAt }),
+        },
+      });
+    } else if (externalReference) {
+      const parts = externalReference.split(':');
+      if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
+        const discordGuildId = parts[0];
+        const planId = parts[1];
+        const userId = parts[2];
+
+        // Encontra a Guild, User e Plan pelo ID
+        const dbGuild = await prisma.guild.findUnique({ where: { discordId: discordGuildId } });
+        const dbUser = await prisma.user.findUnique({ where: { id: userId } });
+        const dbPlan = await prisma.plan.findUnique({ where: { id: planId } });
+
+        if (dbGuild && dbUser && dbPlan) {
+          await prisma.subscription.create({
+            data: {
+              guildId: dbGuild.id,
+              planId: dbPlan.id,
+              createdByUserId: dbUser.id,
+              status: mappedStatus as never,
+              currentPeriodStart: lastModified,
+              currentPeriodEnd: nextPaymentDate,
+              provider: 'MERCADO_PAGO',
+              providerSubscriptionId: preapprovalId,
+              ...(canceledAt && { canceledAt }),
+            },
+          });
+          console.log(`[BillingWorker MP] Assinatura criada com sucesso para a guild ${discordGuildId}`);
+        } else {
+          console.error(
+            `[BillingWorker MP] Falha ao criar assinatura: Guild (${!!dbGuild}), User (${!!dbUser}) ou Plan (${!!dbPlan}) não encontrado.`
+          );
+        }
+      } else {
+        console.warn(`[BillingWorker MP] external_reference com formato inválido: ${externalReference}`);
+      }
+    }
+
+    // Invalida cache se tiver o external_reference (que deve conter o Discord Guild ID como primeira parte)
+    let targetGuildId = '';
     if (externalReference) {
-      await invalidateSubscriptionCache(externalReference);
+      const parts = externalReference.split(':');
+      targetGuildId = parts[0] || '';
+      if (targetGuildId) {
+        await invalidateSubscriptionCache(targetGuildId);
+      }
     }
 
     console.log(
       `[BillingWorker MP] Preapproval ${preapprovalId} → ${mappedStatus}` +
-      (externalReference ? ` (guild: ${externalReference})` : ''),
+      (targetGuildId ? ` (guild: ${targetGuildId})` : ''),
     );
   } else if (notification.type === 'subscription_authorized_payment') {
     // Pagamento autorizado dentro de uma assinatura — garante que o status fique ACTIVE

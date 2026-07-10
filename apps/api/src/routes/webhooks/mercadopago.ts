@@ -142,7 +142,10 @@ mercadoPagoWebhookRoutes.post('/', async (c) => {
       // Se tiver o guildId no corpo (alguns eventos incluem), invalida agora
       const externalRef = (body as Record<string, unknown>)['external_reference'] as string | undefined;
       if (externalRef) {
-        await invalidateSubscriptionCache(externalRef);
+        const guildId = externalRef.split(':')[0];
+        if (guildId) {
+          await invalidateSubscriptionCache(guildId);
+        }
       }
     } catch (err) {
       console.warn('[Webhook MP] Erro ao pré-invalidar cache:', err);

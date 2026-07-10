@@ -210,9 +210,17 @@ function buildInteractionProxy(opts: ProxyOptions) {
           ? (opts.rawData['user'] as Record<string, unknown>)['id']
           : 'unknown',
     },
-    memberPermissions: opts.rawData['member']
-      ? new PermissionsBitField(BigInt((opts.rawData['member'] as Record<string, unknown>)['permissions'] as string))
-      : null,
+    memberPermissions: (() => {
+      const perms = opts.rawData['memberPermissions'] ?? (opts.rawData['member'] as Record<string, unknown> | undefined)?.['permissions'];
+      if (perms !== undefined && perms !== null) {
+        try {
+          return new PermissionsBitField(BigInt(perms as string | number | bigint));
+        } catch (e) {
+          console.warn('[BotWorker] Falha ao converter perms para BigInt:', perms, e);
+        }
+      }
+      return null;
+    })(),
     // Métodos de resposta via REST
     async reply(options: Record<string, unknown>) {
       const flags = buildFlags(options);

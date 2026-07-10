@@ -63,8 +63,10 @@ client.on('interactionCreate', async (interaction: Interaction) => {
         userId: interaction.user.id,
         commandName: interaction.commandName,
         // Serializado como string para evitar erro BigInt no JSON.stringify do BullMQ.
-        // O bot-worker recupera com JSON.parse(rawInteraction as string).
-        rawInteraction: safeSerialize(interaction.toJSON()),
+        rawInteraction: safeSerialize({
+          ...(interaction.toJSON() as Record<string, unknown>),
+          memberPermissions: interaction.memberPermissions?.bitfield,
+        }),
       };
 
       await commandsQueue.add(`cmd:${interaction.commandName}`, jobData, {
@@ -95,7 +97,10 @@ client.on('interactionCreate', async (interaction: Interaction) => {
         customId: interaction.customId,
         componentType,
         // Serializado como string para evitar erro BigInt no JSON.stringify do BullMQ.
-        rawInteraction: safeSerialize(interaction.toJSON()),
+        rawInteraction: safeSerialize({
+          ...(interaction.toJSON() as Record<string, unknown>),
+          memberPermissions: interaction.memberPermissions?.bitfield,
+        }),
       };
 
       await interactionsQueue.add(`interaction:${interaction.customId}`, jobData, {

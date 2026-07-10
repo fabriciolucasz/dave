@@ -351,11 +351,11 @@ Copie `.env.example` para `.env` e preencha as variáveis antes de rodar `docker
 - [x] Guild switcher + tela `/dashboard` (grade de servidores / redirect direto / tela de convite) — ver seção 16.2
 - [x] Tela `/dashboard/[guildId]/overview` — ver seção 16.2
 - [x] Tela `/dashboard/[guildId]/settings` (espelha o `/setup` do Discord) — ver seção 16.2
-- [x] Tela `/dashboard/[guildId]/containers` (somente leitura + desativar, sem criação pelo dashboard na v1) — ver seção 16.2
-- [x] Tela `/dashboard/[guildId]/subscription` (checkout, status, cancelamento com trava de permissão) — ver seção 16.2
+- [x] Tela `/dashboard/[guildId]/paineis` (visualização, criação, edição e exclusão de painéis com split layout e preview real-time no Discord) — ver seção 16.2 e IMPROVE.md
+- [x] Tela `/dashboard/[guildId]/subscription` (checkout, status, cancelamento com trava de permissão e listagem dinâmica com features formatadas) — ver seção 16.2
 - [x] Tela `/account`
 - [x] Estados de loading/vazio/erro de permissão/assinatura vencida em todas as telas — ver seção 16.3
-- [x] Após dashboard pronto: adicionar link na DM de boas-vindas do `guildCreate`
+- [ ] Após dashboard pronto: adicionar link na DM de boas-vindas do `guildCreate`
 
 ### 14.2 Pagamentos ao vivo
 - [ ] Configurar webhooks Mercado Pago em produção

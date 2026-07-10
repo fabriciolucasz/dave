@@ -59,3 +59,15 @@ export type {
   SlashCommandBuilderResult,
   CommandCommon,
 } from './commands/index.js';
+
+// Definições de payloads de containers (seção 18 do PLAN.md)
+export type {
+  ContainerType,
+  BaseContainerPayload,
+  WelcomeContainerPayload,
+  TicketPanelContainerPayload,
+  RulesPanelContainerPayload,
+  VerificationPanelContainerPayload,
+  AnnouncementContainerPayload,
+  ContainerPayload,
+} from './containers/types.js';

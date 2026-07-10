@@ -38,6 +38,19 @@ export default async function GuildLayout({
     redirect('/dashboard');
   }
 
+  let activeSubscription = null;
+  try {
+    const resGuild = await apiRequest<{ guild: any }>(`/guilds/${guildId}`);
+    activeSubscription = resGuild.guild.subscriptions[0] || null;
+  } catch (err) {
+    console.warn('[GuildLayout] Erro ao buscar assinatura:', err);
+  }
+
+  const isExpired =
+    !activeSubscription ||
+    activeSubscription.status === 'EXPIRED' ||
+    activeSubscription.status === 'PAST_DUE';
+
   return (
     <div style={styles.container}>
       {/* Sidebar */}
@@ -90,6 +103,16 @@ export default async function GuildLayout({
             </span>
           </div>
         </div>
+
+        {isExpired && (
+          <div style={styles.expiredBanner} className="animate-fade-in">
+            ⚠️ Este servidor não possui uma assinatura Pro ativa. Alguns recursos premium podem estar bloqueados ou limitados.
+            <Link href={`/dashboard/${guildId}/subscription`} style={styles.bannerLink}>
+              Assinar Pro
+            </Link>
+          </div>
+        )}
+
         <div style={styles.content}>{children}</div>
       </main>
     </div>
@@ -208,5 +231,22 @@ const styles: Record<string, React.CSSProperties> = {
   content: {
     padding: '40px',
     flex: 1,
+  },
+  expiredBanner: {
+    background: 'rgba(218, 55, 60, 0.12)',
+    borderBottom: '1px solid rgba(218, 55, 60, 0.25)',
+    color: '#f25c60',
+    padding: '12px 40px',
+    fontSize: '14px',
+    fontWeight: 600,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  bannerLink: {
+    color: '#ffffff',
+    textDecoration: 'underline',
+    marginLeft: '6px',
+    fontWeight: 700,
   },
 };

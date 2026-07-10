@@ -48,6 +48,50 @@ export async function handleGuildOnboarding(data: GuildOnboardingJobData): Promi
     },
   });
 
+  // 1.1 Garante que o User correspondente ao dono do servidor existe para vincular a assinatura
+  const ownerUser = await prisma.user.upsert({
+    where: { discordId: ownerDiscordId },
+    update: {},
+    create: {
+      discordId: ownerDiscordId,
+      username: `owner_${ownerDiscordId}`,
+    },
+  });
+
+  // Vincula o ownerUserId na guilda recém-criada/atualizada se não estiver preenchido
+  if (!guild.ownerUserId) {
+    guild = await prisma.guild.update({
+      where: { id: guild.id },
+      data: { ownerUserId: ownerUser.id },
+    });
+  }
+
+  // 1.2 Ativa trial automático de 7 dias do plano Pro caso a guilda nunca tenha tido assinaturas
+  const existingSub = await prisma.subscription.findFirst({
+    where: { guildId: guild.id },
+  });
+
+  if (!existingSub) {
+    const proPlan = await prisma.plan.findFirst({
+      where: { code: 'pro' },
+    });
+
+    if (proPlan) {
+      await prisma.subscription.create({
+        data: {
+          guildId: guild.id,
+          planId: proPlan.id,
+          createdByUserId: ownerUser.id,
+          status: 'TRIALING',
+          currentPeriodStart: new Date(),
+          currentPeriodEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 dias de trial
+          provider: 'MERCADO_PAGO',
+        },
+      });
+      console.log(`[Onboarding] Trial automático de 7 dias do plano Pro ativado para a guild: ${guildName}`);
+    }
+  }
+
   // 2. Tenta enviar DM ao dono com embed de boas-vindas
   const embed = infoEmbed(
     'Olá! O Dave foi adicionado ao seu servidor.',

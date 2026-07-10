@@ -3,6 +3,8 @@ import { Routes } from 'discord.js';
 import type { ContainerRepostJobData } from '@dave/shared-types';
 import { rest } from '../index.js';
 import { containerRepostQueue } from '@dave/queue';
+import { buildContainerDiscordPayload } from '@dave/discord-kit';
+import { env } from '@dave/config';
 
 // ---------------------------------------------------------------------------
 // jobs/container-repost.ts — Gerencia repostagem de Sticky Messages
@@ -78,26 +80,87 @@ export async function handleContainerRepost(data: ContainerRepostJobData): Promi
     }
 
     if (container.messageId !== null) {
-      console.log(`[ContainerRepost] Container ${containerId} já possui uma mensagem ativa (${container.messageId}). Evitando postagem duplicada.`);
+      console.log(`[ContainerRepost] Container ${containerId} já possui uma mensagem activa (${container.messageId}). Evitando postagem duplicada.`);
       return;
     }
 
     // Envia a nova mensagem utilizando o payload armazenado
     try {
-      const payload = container.payload as Record<string, unknown>;
+      let discordPayload = container.payload as Record<string, any>;
+      let sentMessageId: string;
 
-      console.log(`[ContainerRepost] Enviando mensagem de container persistente no canal ${channelId}`);
-      const sentMessage = (await rest.post(Routes.channelMessages(channelId), {
-        body: payload,
-      })) as { id: string };
+      const isStructured = !discordPayload.content && !discordPayload.embeds;
+      const structuredPayload = isStructured ? (container.payload as any) : null;
+
+      if (isStructured) {
+        console.log(`[ContainerRepost] Renderizando ContainerPayload estruturado (tipo: ${container.type}) para formato do Discord API`);
+        discordPayload = buildContainerDiscordPayload(structuredPayload);
+      }
+
+      // Se houver configuração de webhook customizado, tenta enviar via Webhook do Discord
+      if (structuredPayload?.customWebhook?.name) {
+        try {
+          const webhookConfig = structuredPayload.customWebhook;
+          
+          console.log(`[ContainerRepost] Buscando webhooks no canal ${channelId} para envio com identidade customizada...`);
+          // 1. Busca webhooks existentes no canal
+          const webhooks = (await rest.get(Routes.channelWebhooks(channelId))) as any[];
+          
+          // Procura um webhook pertencente ao bot
+          let targetWebhook = webhooks.find(
+            (wh) => wh.application_id === env.DISCORD_CLIENT_ID || wh.user?.id === env.DISCORD_CLIENT_ID
+          );
+
+          // Se não existir, cria um
+          if (!targetWebhook) {
+            console.log(`[ContainerRepost] Nenhum webhook existente encontrado. Criando novo webhook 'Dave Integration' no canal ${channelId}`);
+            targetWebhook = await rest.post(Routes.channelWebhooks(channelId), {
+              body: {
+                name: 'Dave Integration',
+              },
+            });
+          }
+
+          console.log(`[ContainerRepost] Enviando mensagem via Webhook ${targetWebhook.id} com identidade: ${webhookConfig.name}`);
+
+          const webhookResponse = (await rest.post(
+            Routes.webhook(targetWebhook.id, targetWebhook.token),
+            {
+              query: new URLSearchParams({ wait: 'true' }),
+              body: {
+                ...discordPayload,
+                username: webhookConfig.name,
+                avatar_url: webhookConfig.avatarUrl || undefined,
+              },
+            }
+          )) as { id: string };
+
+          sentMessageId = webhookResponse.id;
+        } catch (webhookErr) {
+          console.warn('[ContainerRepost] Falha ao enviar via webhook customizado. Fallback para envio padrão como Bot.', webhookErr);
+          
+          // Fallback para envio normal como bot
+          const sentMessage = (await rest.post(Routes.channelMessages(channelId), {
+            body: discordPayload,
+          })) as { id: string };
+          sentMessageId = sentMessage.id;
+        }
+      } else {
+        // Envio normal como bot
+        console.log(`[ContainerRepost] Enviando mensagem de container persistente no canal ${channelId} via REST Bot`);
+        const sentMessage = (await rest.post(Routes.channelMessages(channelId), {
+          body: discordPayload,
+        })) as { id: string };
+        sentMessageId = sentMessage.id;
+      }
 
       // Atualiza o id da nova mensagem no banco
       await prisma.guildContainer.update({
         where: { id: container.id },
-        data: { messageId: sentMessage.id },
+        data: { messageId: sentMessageId },
       });
 
-      console.log(`[ContainerRepost] Container ${container.id} repostado com sucesso. Nova MessageID: ${sentMessage.id}`);
+      console.log(`[ContainerRepost] Container ${container.id} repostado com sucesso. Nova MessageID: ${sentMessageId}`);
     } catch (error) {
       console.error(`[ContainerRepost] Falha ao reenviar mensagem do container ${container.id}:`, error);
       throw error; // BullMQ faz retry

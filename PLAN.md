@@ -346,22 +346,22 @@ Copie `.env.example` para `.env` e preencha as variáveis antes de rodar `docker
 ## 14. Próximos passos
 
 ### 14.1 Dashboard Frontend
-- [ ] Setup do app `dashboard` no Turborepo (Next.js)
-- [ ] Login via Discord OAuth2
-- [ ] Guild switcher + tela `/dashboard` (grade de servidores / redirect direto / tela de convite) — ver seção 16.2
-- [ ] Tela `/dashboard/[guildId]/overview` — ver seção 16.2
-- [ ] Tela `/dashboard/[guildId]/settings` (espelha o `/setup` do Discord) — ver seção 16.2
-- [ ] Tela `/dashboard/[guildId]/containers` (somente leitura + desativar, sem criação pelo dashboard na v1) — ver seção 16.2
-- [ ] Tela `/dashboard/[guildId]/subscription` (checkout, status, cancelamento com trava de permissão) — ver seção 16.2
-- [ ] Tela `/account`
-- [ ] Estados de loading/vazio/erro de permissão/assinatura vencida em todas as telas — ver seção 16.3
-- [ ] Após dashboard pronto: adicionar link na DM de boas-vindas do `guildCreate`
+- [x] Setup do app `dashboard` no Turborepo (Next.js)
+- [x] Login via Discord OAuth2
+- [x] Guild switcher + tela `/dashboard` (grade de servidores / redirect direto / tela de convite) — ver seção 16.2
+- [x] Tela `/dashboard/[guildId]/overview` — ver seção 16.2
+- [x] Tela `/dashboard/[guildId]/settings` (espelha o `/setup` do Discord) — ver seção 16.2
+- [x] Tela `/dashboard/[guildId]/containers` (somente leitura + desativar, sem criação pelo dashboard na v1) — ver seção 16.2
+- [x] Tela `/dashboard/[guildId]/subscription` (checkout, status, cancelamento com trava de permissão) — ver seção 16.2
+- [x] Tela `/account`
+- [x] Estados de loading/vazio/erro de permissão/assinatura vencida em todas as telas — ver seção 16.3
+- [x] Após dashboard pronto: adicionar link na DM de boas-vindas do `guildCreate`
 
 ### 14.2 Pagamentos ao vivo
 - [ ] Configurar webhooks Mercado Pago em produção
-- [ ] Testar fluxo completo: checkout → pagamento → atualização de `Subscription`
+- [x] Testar fluxo completo: checkout → pagamento → atualização de `Subscription`
 - [ ] Configurar webhooks Stripe (secundário)
-- [ ] Job de expiração automática de assinatura no `billing-worker`
+- [x] Job de expiração automática de assinatura no `billing-worker`
 
 ## 15. Fluxo de Ativação do Bot (Opção C — Híbrida)
 

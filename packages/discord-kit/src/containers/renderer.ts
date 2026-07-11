@@ -9,30 +9,68 @@ import {
   MediaGalleryItemBuilder,
 } from 'discord.js';
 
+export interface ParsedBlock {
+  type: 'text' | 'separator' | 'gallery';
+  content?: string;
+  url?: string;
+}
+
+/**
+ * Converte a string de descrição em blocos de conteúdo para layout de container.
+ * Suporta divisores (---) e galerias ([gallery: http://...]).
+ */
+export function parseContainerDescription(text: string): ParsedBlock[] {
+  if (!text) return [];
+  const lines = text.split('\n');
+  const blocks: ParsedBlock[] = [];
+  let currentTextLines: string[] = [];
+
+  const flushText = () => {
+    if (currentTextLines.length > 0) {
+      blocks.push({
+        type: 'text',
+        content: currentTextLines.join('\n').trim(),
+      });
+      currentTextLines = [];
+    }
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === '---' || trimmed === '<divider>' || trimmed === '[divider]') {
+      flushText();
+      blocks.push({ type: 'separator' });
+    } else if (trimmed.startsWith('[gallery:') && trimmed.endsWith(']')) {
+      flushText();
+      const url = trimmed.slice('[gallery:'.length, -1).trim();
+      blocks.push({ type: 'gallery', url });
+    } else {
+      currentTextLines.push(line);
+    }
+  }
+  flushText();
+  return blocks;
+}
+
 /**
  * Converte o ContainerPayload estruturado (da Seção 18) em um payload JSON compatível
  * com o envio de mensagens do Discord (usado na API de webhooks/reposts).
  * 
- * Se context for fornecido, resolve variáveis dinâmicas nos campos de texto.
+ * Se context for fornecido, resolve variáveis dinâmicas APENAS no campo de descrição.
  */
 export function buildContainerDiscordPayload(
   payload: ContainerPayload,
   context?: Record<string, string>
 ): Record<string, any> {
-  // Resolve placeholders se houver contexto
-  const resolvedTitle = context && payload.title 
-    ? resolvePlaceholders(payload.title, context) 
-    : (payload.title || '');
-
+  // As variáveis ${} só podem ser usadas na descrição
+  const resolvedTitle = payload.title || '';
   const resolvedDescription = context && payload.description 
     ? resolvePlaceholders(payload.description, context) 
     : (payload.description || '');
 
   let resolvedButtonLabel = '';
   if ('buttonLabel' in payload && payload.buttonLabel) {
-    resolvedButtonLabel = context 
-      ? resolvePlaceholders(payload.buttonLabel, context) 
-      : payload.buttonLabel;
+    resolvedButtonLabel = payload.buttonLabel;
   }
 
   // ---------------------------------------------------------------------------
@@ -46,8 +84,20 @@ export function buildContainerDiscordPayload(
     }
 
     if (resolvedDescription) {
-      container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
-      container.addTextDisplayComponents(new TextDisplayBuilder().setContent(resolvedDescription));
+      const blocks = parseContainerDescription(resolvedDescription);
+      for (const block of blocks) {
+        if (block.type === 'text' && block.content) {
+          container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+          container.addTextDisplayComponents(new TextDisplayBuilder().setContent(block.content));
+        } else if (block.type === 'separator') {
+          container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+        } else if (block.type === 'gallery' && block.url) {
+          container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+          const gallery = new MediaGalleryBuilder();
+          gallery.addItems(new MediaGalleryItemBuilder().setURL(block.url));
+          container.addMediaGalleryComponents(gallery);
+        }
+      }
     }
 
     if (payload.bannerUrl) {

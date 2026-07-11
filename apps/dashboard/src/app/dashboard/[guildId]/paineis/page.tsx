@@ -115,6 +115,7 @@ export default async function PaineisPage({
   return (
     <PaineisList
       guildId={guildId}
+      guildName={guildDetail?.name || 'Servidor'}
       panelTypes={panelTypes}
       initialContainers={containers}
       channels={channels}

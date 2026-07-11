@@ -15,6 +15,7 @@ interface ContainerType {
 
 interface PanelConfigFormProps {
   guildId: string;
+  guildName: string;
   channels: Array<{ id: string; name: string }>;
   panelType: ContainerType;
   existingContainer: any | null;
@@ -26,6 +27,12 @@ interface PanelConfigFormProps {
   };
   currentPlanCode: string;
   onSaveSuccess: (saved: any) => void;
+}
+
+interface ParsedBlock {
+  type: 'text' | 'separator' | 'gallery';
+  content?: string;
+  url?: string;
 }
 
 const getAvailablePlaceholders = (type: string): string[] => {
@@ -52,8 +59,42 @@ const resolvePlaceholders = (text: string, context: Record<string, string>): str
   return resolved;
 };
 
+const parseContainerDescription = (text: string): ParsedBlock[] => {
+  if (!text) return [];
+  const lines = text.split('\n');
+  const blocks: ParsedBlock[] = [];
+  let currentTextLines: string[] = [];
+
+  const flushText = () => {
+    if (currentTextLines.length > 0) {
+      blocks.push({
+        type: 'text',
+        content: currentTextLines.join('\n').trim(),
+      });
+      currentTextLines = [];
+    }
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === '---' || trimmed === '<divider>' || trimmed === '[divider]') {
+      flushText();
+      blocks.push({ type: 'separator' });
+    } else if (trimmed.startsWith('[gallery:') && trimmed.endsWith(']')) {
+      flushText();
+      const url = trimmed.slice('[gallery:'.length, -1).trim();
+      blocks.push({ type: 'gallery', url });
+    } else {
+      currentTextLines.push(line);
+    }
+  }
+  flushText();
+  return blocks;
+};
+
 export function PanelConfigForm({
   guildId,
+  guildName,
   channels,
   panelType,
   existingContainer,
@@ -113,12 +154,18 @@ export function PanelConfigForm({
     }, 0);
   };
 
+  // Nome e avatar padrão do bot (caso não especificado no webhook)
+  const defaultBotName = 'Dave';
+  const defaultBotAvatar = ''; // Será renderizado o placeholder padrão com gradiente premium
+
   const mockContext = {
     welcomeUser: '@Fulano',
-    serverName: 'Nome do Servidor (Preview)',
+    serverName: guildName,
     memberCount: '1,234',
     authorName: 'Administrador',
   };
+
+  const resolvedDescription = resolvePlaceholders(description, mockContext);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -231,20 +278,6 @@ export function PanelConfigForm({
               className="form-control"
               required
             />
-            {placeholders.length > 0 && (
-              <div style={styles.placeholdersContainer}>
-                {placeholders.map((ph) => (
-                  <button
-                    type="button"
-                    key={ph}
-                    onClick={() => insertPlaceholder('field-title', ph, setTitle)}
-                    style={styles.placeholderBtn}
-                  >
-                    + {`\${${ph}}`}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
 
           <div className="form-group">
@@ -255,7 +288,7 @@ export function PanelConfigForm({
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Use markdown para formatar (ex: **negrito**, \`código\`)"
               className="form-control"
-              rows={4}
+              rows={5}
               style={{ resize: 'vertical' }}
               required
             />
@@ -336,20 +369,6 @@ export function PanelConfigForm({
                 placeholder={panelType.type === 'ticket_panel' ? 'Criar Ticket' : 'Verificar-se'}
                 className="form-control"
               />
-              {placeholders.length > 0 && (
-                <div style={styles.placeholdersContainer}>
-                  {placeholders.map((ph) => (
-                    <button
-                      type="button"
-                      key={ph}
-                      onClick={() => insertPlaceholder('field-buttonLabel', ph, setButtonLabel)}
-                      style={styles.placeholderBtn}
-                    >
-                      + {`\${${ph}}`}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
           )}
 
@@ -474,7 +493,7 @@ export function PanelConfigForm({
           <div style={styles.discordContent}>
             <div style={styles.discordUserHeader}>
               <span style={styles.discordUsername}>
-                {isPro && webhookName ? webhookName : 'Dave'}
+                {isPro && webhookName ? webhookName : defaultBotName}
               </span>
               <span style={styles.discordBotTag}>BOT</span>
               <span style={styles.discordTimestamp}>Hoje às 19:40</span>
@@ -485,19 +504,39 @@ export function PanelConfigForm({
               <div style={styles.discordContainerLayout}>
                 {title && (
                   <div style={styles.discordContainerTitle}>
-                    {resolvePlaceholders(title, mockContext)}
+                    {title}
                   </div>
                 )}
-                {description && (
+                {resolvedDescription && (
                   <>
-                    <div style={styles.discordContainerSeparator} />
-                    <div style={styles.discordContainerDesc}>
-                      {resolvePlaceholders(description, mockContext)
-                        .split('\n')
-                        .map((line: string, idx: number) => (
-                          <div key={idx}>{line}</div>
-                        ))}
-                    </div>
+                    {parseContainerDescription(resolvedDescription).map((block, bIdx) => {
+                      if (block.type === 'text' && block.content) {
+                        return (
+                          <div key={bIdx} style={{ display: 'contents' }}>
+                            <div style={styles.discordContainerSeparator} />
+                            <div style={styles.discordContainerDesc}>
+                              {block.content.split('\n').map((line, lIdx) => (
+                                <div key={lIdx}>{line}</div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      }
+                      if (block.type === 'separator') {
+                        return <div key={bIdx} style={styles.discordContainerSeparator} />;
+                      }
+                      if (block.type === 'gallery' && block.url) {
+                        return (
+                          <div key={bIdx} style={{ display: 'contents' }}>
+                            <div style={styles.discordContainerSeparator} />
+                            <div style={styles.discordEmbedImageWrapper}>
+                              <img src={block.url} alt="Gallery item" style={styles.discordEmbedImage} />
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })}
                   </>
                 )}
                 {bannerUrl && (
@@ -513,16 +552,14 @@ export function PanelConfigForm({
               <div style={{ ...styles.discordEmbed, borderLeftColor: accentColor }}>
                 {title && (
                   <div style={styles.discordEmbedTitle}>
-                    {resolvePlaceholders(title, mockContext)}
+                    {title}
                   </div>
                 )}
-                {description && (
+                {resolvedDescription && (
                   <div style={styles.discordEmbedDesc}>
-                    {resolvePlaceholders(description, mockContext)
-                      .split('\n')
-                      .map((line: string, idx: number) => (
-                        <div key={idx}>{line}</div>
-                      ))}
+                    {resolvedDescription.split('\n').map((line, idx) => (
+                      <div key={idx}>{line}</div>
+                    ))}
                   </div>
                 )}
                 {bannerUrl && (
@@ -542,9 +579,7 @@ export function PanelConfigForm({
                     backgroundColor: panelType.type === 'ticket_panel' ? '#5865f2' : '#248046',
                   }}
                 >
-                  {buttonLabel
-                    ? resolvePlaceholders(buttonLabel, mockContext)
-                    : (panelType.type === 'ticket_panel' ? 'Criar Ticket' : 'Verificar-se')}
+                  {buttonLabel || (panelType.type === 'ticket_panel' ? 'Criar Ticket' : 'Verificar-se')}
                 </div>
               </div>
             )}
@@ -707,7 +742,7 @@ const styles: Record<string, React.CSSProperties> = {
   discordAvatarPlaceholder: {
     width: '100%',
     height: '100%',
-    background: '#5865f2',
+    background: 'linear-gradient(135deg, #5865f2 0%, #2b2d31 100%)',
     color: '#ffffff',
     display: 'flex',
     alignItems: 'center',

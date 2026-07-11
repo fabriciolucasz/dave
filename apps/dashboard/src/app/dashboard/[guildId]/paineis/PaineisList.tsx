@@ -47,6 +47,7 @@ interface PlanFeatures {
 
 interface PaineisListProps {
   guildId: string;
+  guildName: string;
   panelTypes: ContainerType[];
   initialContainers: ContainerItem[];
   channels: Array<{ id: string; name: string }>;
@@ -64,6 +65,7 @@ const ICON_MAP: Record<string, React.ComponentType<any>> = {
 
 export function PaineisList({
   guildId,
+  guildName,
   panelTypes,
   initialContainers,
   channels,
@@ -128,6 +130,7 @@ export function PaineisList({
         <div className="card-glass" style={styles.formContainer}>
           <PanelConfigForm
             guildId={guildId}
+            guildName={guildName}
             channels={channels}
             panelType={selectedType}
             existingContainer={existingContainer}

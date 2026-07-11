@@ -73,3 +73,4 @@ export type {
 } from './containers/types.js';
 export { buildContainerDiscordPayload, parseContainerDescription } from './containers/renderer.js';
 export { getAvailablePlaceholders, resolvePlaceholders } from './containers/placeholders.js';
+export * from './containers/blocks.js';

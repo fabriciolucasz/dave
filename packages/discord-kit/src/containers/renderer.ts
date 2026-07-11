@@ -7,6 +7,11 @@ import {
   SeparatorBuilder,
   MediaGalleryBuilder,
   MediaGalleryItemBuilder,
+  SectionBuilder,
+  FileBuilder,
+  ThumbnailBuilder,
+  ButtonBuilder,
+  ButtonStyle,
 } from 'discord.js';
 
 export interface ParsedBlock {
@@ -53,10 +58,10 @@ export function parseContainerDescription(text: string): ParsedBlock[] {
 }
 
 /**
- * Converte o ContainerPayload estruturado (da Seção 18) em um payload JSON compatível
+ * Converte o ContainerPayload estruturado (da Seção 18 e 20) em um payload JSON compatível
  * com o envio de mensagens do Discord (usado na API de webhooks/reposts).
  * 
- * Se context for fornecido, resolve variáveis dinâmicas APENAS no campo de descrição.
+ * Se context for fornecido, resolve variáveis dinâmicas APENAS no campo de descrição e blocos de texto.
  */
 export function buildContainerDiscordPayload(
   payload: ContainerPayload,
@@ -79,32 +84,89 @@ export function buildContainerDiscordPayload(
   if (payload.renderMode === 'container') {
     const container = new ContainerBuilder();
 
-    if (resolvedTitle) {
-      container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${resolvedTitle}`));
-    }
-
-    if (resolvedDescription) {
-      const blocks = parseContainerDescription(resolvedDescription);
-      for (const block of blocks) {
-        if (block.type === 'text' && block.content) {
-          container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
-          container.addTextDisplayComponents(new TextDisplayBuilder().setContent(block.content));
-        } else if (block.type === 'separator') {
-          container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
-        } else if (block.type === 'gallery' && block.url) {
-          container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
-          const gallery = new MediaGalleryBuilder();
-          gallery.addItems(new MediaGalleryItemBuilder().setURL(block.url));
-          container.addMediaGalleryComponents(gallery);
+    // Se houver blocos estruturados (Seção 20.2), renderiza-os em ordem
+    if (payload.blocks && payload.blocks.length > 0) {
+      for (const block of payload.blocks) {
+        if (block.blockType === 'text') {
+          const blockText = context && block.content
+            ? resolvePlaceholders(block.content, context)
+            : (block.content || '');
+          container.addTextDisplayComponents(new TextDisplayBuilder().setContent(blockText));
+        } else if (block.blockType === 'separator') {
+          const separator = new SeparatorBuilder();
+          if (block.divider !== undefined) {
+            separator.setDivider(block.divider);
+          }
+          if (block.spacing) {
+            // SeparatorSpacingSize.Large = 2, Small = 1
+            const spacingVal = block.spacing === 'large' ? 2 : 1;
+            separator.setSpacing(spacingVal);
+          }
+          container.addSeparatorComponents(separator);
+        } else if (block.blockType === 'gallery') {
+          if (block.items && block.items.length > 0) {
+            const gallery = new MediaGalleryBuilder();
+            for (const item of block.items) {
+              const galleryItem = new MediaGalleryItemBuilder().setURL(item.url);
+              if (item.alt) {
+                galleryItem.setDescription(item.alt);
+              }
+              gallery.addItems(galleryItem);
+            }
+            container.addMediaGalleryComponents(gallery);
+          }
+        } else if (block.blockType === 'section') {
+          const section = new SectionBuilder();
+          const sectionText = context && block.text
+            ? resolvePlaceholders(block.text, context)
+            : (block.text || '');
+          section.addTextDisplayComponents(new TextDisplayBuilder().setContent(sectionText));
+          if (block.accessory) {
+            if (block.accessory.type === 'thumbnail' && block.accessory.url) {
+              section.setThumbnailAccessory(new ThumbnailBuilder().setURL(block.accessory.url));
+            } else if (block.accessory.type === 'button' && block.accessory.label) {
+              section.setButtonAccessory(
+                new ButtonBuilder()
+                  .setLabel(block.accessory.label)
+                  .setCustomId(block.accessory.url || 'section_btn')
+                  .setStyle(ButtonStyle.Primary)
+              );
+            }
+          }
+          container.addSectionComponents(section);
+        } else if (block.blockType === 'file') {
+          container.addFileComponents(new FileBuilder().setURL(block.url));
         }
       }
-    }
+    } else {
+      // Fallback para quando não houver blocos (modo legado / markup da Seção 19)
+      if (resolvedTitle) {
+        container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${resolvedTitle}`));
+      }
 
-    if (payload.bannerUrl) {
-      container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
-      const gallery = new MediaGalleryBuilder();
-      gallery.addItems(new MediaGalleryItemBuilder().setURL(payload.bannerUrl));
-      container.addMediaGalleryComponents(gallery);
+      if (resolvedDescription) {
+        const blocks = parseContainerDescription(resolvedDescription);
+        for (const block of blocks) {
+          if (block.type === 'text' && block.content) {
+            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+            container.addTextDisplayComponents(new TextDisplayBuilder().setContent(block.content));
+          } else if (block.type === 'separator') {
+            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+          } else if (block.type === 'gallery' && block.url) {
+            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+            const gallery = new MediaGalleryBuilder();
+            gallery.addItems(new MediaGalleryItemBuilder().setURL(block.url));
+            container.addMediaGalleryComponents(gallery);
+          }
+        }
+      }
+
+      if (payload.bannerUrl) {
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true));
+        const gallery = new MediaGalleryBuilder();
+        gallery.addItems(new MediaGalleryItemBuilder().setURL(payload.bannerUrl));
+        container.addMediaGalleryComponents(gallery);
+      }
     }
 
     const actionComponents: any[] = [];
@@ -145,7 +207,7 @@ export function buildContainerDiscordPayload(
   }
 
   // ---------------------------------------------------------------------------
-  // Modo de Renderização 2: Embed Tradicional (Default)
+  // Modo de Renderização 2: Embed Tradicional (Default) - Seção 20.1
   // ---------------------------------------------------------------------------
   const colorHex = payload.accentColor || '#5865f2';
   const cleanHex = colorHex.replace('#', '');
@@ -163,8 +225,45 @@ export function buildContainerDiscordPayload(
     embed.description = resolvedDescription;
   }
 
-  if (payload.bannerUrl) {
-    embed.image = { url: payload.bannerUrl };
+  // Mapeamento dos campos adicionais do EmbedBuilder (Seção 20.1)
+  if (payload.url) {
+    embed.url = payload.url;
+  }
+
+  if (payload.imageUrl) {
+    embed.image = { url: payload.imageUrl };
+  } else if (payload.bannerUrl) {
+    embed.image = { url: payload.bannerUrl }; // Fallback legado
+  }
+
+  if (payload.thumbnailUrl) {
+    embed.thumbnail = { url: payload.thumbnailUrl };
+  }
+
+  if (payload.authorName) {
+    embed.author = {
+      name: payload.authorName,
+      icon_url: payload.authorIconUrl || undefined,
+    };
+  }
+
+  if (payload.footerText) {
+    embed.footer = {
+      text: payload.footerText,
+      icon_url: payload.footerIconUrl || undefined,
+    };
+  }
+
+  if (payload.showTimestamp) {
+    embed.timestamp = new Date().toISOString();
+  }
+
+  if (payload.fields && payload.fields.length > 0) {
+    embed.fields = payload.fields.map(f => ({
+      name: f.name,
+      value: f.value,
+      inline: f.inline || false,
+    }));
   }
 
   const components: any[] = [];

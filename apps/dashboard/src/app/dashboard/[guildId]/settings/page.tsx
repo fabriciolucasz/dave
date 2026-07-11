@@ -48,9 +48,9 @@ export default async function SettingsPage({
     console.error('[SettingsPage] Falha ao consultar API do Discord:', err);
   }
 
-  // Filtra apenas canais de texto (type = 0)
+  // Filtra canais de texto e anúncio (type = 0 e type = 5)
   const channels = rawChannels
-    .filter((c: any) => c.type === 0)
+    .filter((c: any) => c.type === 0 || c.type === 5)
     .map((c: any) => ({ id: c.id, name: c.name }));
 
   // Filtra e remove o cargo @everyone (id igual ao discordId da guilda)

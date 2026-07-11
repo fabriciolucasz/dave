@@ -52,6 +52,25 @@ app.get('/plans', async (c) => {
   return c.json({ plans });
 });
 
+app.get('/bot/identity', async (c) => {
+  try {
+    const res = await fetch('https://discord.com/api/v10/users/@me', {
+      headers: { Authorization: `Bot ${env.DISCORD_TOKEN}` },
+    });
+    if (!res.ok) {
+      return c.json({ username: 'Dave', avatarURL: null });
+    }
+    const data = (await res.json()) as { id: string; username: string; avatar: string | null };
+    const avatarURL = data.avatar
+      ? `https://cdn.discordapp.com/avatars/${data.id}/${data.avatar}.png`
+      : null;
+    return c.json({ username: data.username, avatarURL });
+  } catch (err) {
+    console.error('[API] Erro ao buscar identidade do Bot:', err);
+    return c.json({ username: 'Dave', avatarURL: null });
+  }
+});
+
 app.route('/auth', authRoutes);
 app.route('/guilds', guildsRoutes);
 app.route('/subscriptions', subscriptionsRoutes);

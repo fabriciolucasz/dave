@@ -535,3 +535,61 @@ Implementação:
 
 - `ContainerIdentity` (seção 18.1) ganha `renderMode: 'embed' | 'container'`.
 - Nenhuma migration de schema necessária além disso — `payload` já é `Json` livre em `guild_containers` (seção 13), então `renderMode` e o texto com `${variaveis}` cabem no formato existente.
+
+## 20. Criação de painéis: fidelidade ao formato real (Embed vs Container), preview fiel e correção de canais
+
+Correção de rumo importante: a criação de um painel **precisa refletir 1:1 a estrutura real que o Discord.js usa**, não markup sintético (`---`, `<divider>`, etc.) que depois é convertido. Isso vale tanto pra Embed quanto pra Container, mas é especialmente crítico no Container, que é o formato com mais capacidade de customização.
+
+### 20.1 Modo Embed — formulário espelha `EmbedBuilder`
+
+Sem blocos, sem componentes — um `EmbedBuilder` tem uma estrutura fixa de campos. O formulário no dashboard expõe exatamente esses campos, nada além:
+
+| Campo do formulário | Método do `EmbedBuilder` |
+|---|---|
+| Título | `.setTitle()` |
+| Descrição (textarea, aceita variáveis — seção 19.2) | `.setDescription()` |
+| Cor de destaque | `.setColor()` |
+| URL do título (opcional, vira link clicável) | `.setURL()` |
+| Imagem principal | `.setImage()` |
+| Thumbnail (miniatura no canto) | `.setThumbnail()` |
+| Autor (nome + ícone, opcional) | `.setAuthor({ name, iconURL })` |
+| Rodapé (texto + ícone, opcional) | `.setFooter({ text, iconURL })` |
+| Timestamp (toggle "mostrar horário atual") | `.setTimestamp()` |
+| Campos (lista de nome/valor/inline, adicionar/remover/reordenar) | `.addFields({ name, value, inline })` repetido |
+
+Nenhum campo aqui é livre — cada um mapeia direto pra um método real do builder, então o payload salvo (`ContainerIdentity` + estes campos específicos do modo embed) é suficiente pra reconstruir o embed sem ambiguidade.
+
+### 20.2 Modo Container — construção interativa por blocos, não markup
+
+Esta é a mudança central pedida: o Container (Components v2) é montado como **uma lista ordenada de blocos que o gestor adiciona, reordena e remove pela UI** — cada bloco mapeia 1:1 para um componente real do discord.js. Nenhuma sintaxe de texto (`---`, `<divider>`) é interpretada; o divisor, por exemplo, é literalmente adicionado clicando em um botão "Adicionar divisor" na lista de blocos, não digitado.
+
+Blocos disponíveis na v1, cada um correspondendo diretamente a um componente do Components v2:
+
+| Bloco na UI | Componente real do discord.js | Configurável pelo gestor |
+|---|---|---|
+| **Texto** | `TextDisplayBuilder` | Conteúdo (aceita variáveis, seção 19.2, e markdown — negrito/itálico/etc via toolbar, não digitado cru) |
+| **Divisor** | `SeparatorBuilder` | Espaçamento (pequeno/grande), exibir linha ou só espaço |
+| **Galeria de mídia** | `MediaGalleryBuilder` (com `MediaGalleryItemBuilder[]`) | Lista de URLs de imagem, cada uma com descrição alternativa opcional |
+| **Seção** (texto + acessório) | `SectionBuilder` (com `TextDisplayBuilder[]` + `ThumbnailBuilder` ou botão como acessório) | Texto(s) da seção + escolha do acessório (thumbnail ou botão) |
+| **Arquivo** | `FileBuilder` | URL do arquivo anexado |
+
+Comportamento da UI de construção:
+- Lista vertical dos blocos já adicionados, cada um com alça de arrastar (reordenar), botão de editar (abre painel de configuração daquele bloco específico) e botão de remover.
+- Botão "+" no final da lista abre um menu com os tipos de bloco disponíveis para adicionar — cada tipo abre seu próprio formulário curto (ex: bloco de texto abre um textarea com toolbar de formatação; bloco de galeria abre uma lista de URLs).
+- Nenhum campo de "cole o markup aqui" em lugar nenhum — toda edição é através de controles (textarea com toolbar, inputs de URL, toggles), mesmo para formatação de texto dentro de um bloco de texto (negrito/itálico via botões de toolbar que inserem a sintaxe markdown do Discord no textarea automaticamente, o gestor não precisa saber a sintaxe).
+
+**Modelo de dados**: o payload de um painel em modo `container` guarda um array ordenado de blocos tipados (união discriminada por `blockType`), refletindo exatamente os componentes do discord.js — proposto em `packages/discord-kit/src/containers/blocks.ts` (ver arquivo à parte).
+
+### 20.3 Live Preview — identidade real do bot e suporte a markdown
+
+Dois problemas identificados no preview atual, ambos corrigidos:
+
+**Identidade do remetente**: o preview deve mostrar o **avatar e nome reais do bot** (buscados do próprio client do Discord, ou de um endpoint `GET /bot/identity` que retorna `avatarURL`/`username` da aplicação) como remetente padrão — e trocar para o `customWebhook.name`/`customWebhook.avatarUrl` configurado no painel quando esse campo estiver preenchido (plano Pro+, seção 18.3). Hoje aparentemente o preview usa um placeholder genérico; precisa refletir exatamente quem vai aparecer como remetente da mensagem real.
+
+**Renderização de markdown**: o preview precisa interpretar a sintaxe markdown do Discord (`**negrito**`, `*itálico*`, `__sublinhado__`, `~~riscado~~`, `` `código` ``, blocos de código, `> citação`, listas, spoilers `||texto||`, links) e renderizar visualmente, não mostrar os caracteres crus. Implementação sugerida: usar uma lib de parsing de markdown com o dialeto do Discord (ex: `discord-markdown` no npm, que já lida com as particularidades do Discord — menções, emojis customizados, etc. — diferente de um parser de markdown genérico) no componente de preview do dashboard, aplicada tanto no modo Embed quanto no Container (todo bloco de texto passa pelo mesmo renderer).
+
+### 20.4 Correção: seletor de canal retornando categorias
+
+Bug identificado: o select de canal (usado em `/dashboard/[guildId]/settings` e na escolha de canal de destino de um painel, seção 2.3 do prompt de UI) está retornando **categorias** (`ChannelType.GuildCategory`) junto com canais de texto — categorias não aceitam envio de mensagem, então selecionar uma quebra o envio.
+
+Correção: o endpoint que lista os canais da guild (provavelmente algo como `GET /guilds/:guildId/channels`) deve filtrar explicitamente por tipo antes de retornar — permitir apenas `ChannelType.GuildText` e, se fizer sentido pro produto, `ChannelType.GuildAnnouncement`. Excluir categorias, canais de voz, fóruns e qualquer outro tipo que não aceite `.send()` de uma mensagem comum. Esse filtro deve acontecer no backend (não só escondido no frontend), para que a validação do `POST /guilds/:guildId/setup` e do endpoint de configuração de painel também rejeitem um `channelId` de categoria caso ele chegue por algum outro caminho.

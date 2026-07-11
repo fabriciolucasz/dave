@@ -12,13 +12,29 @@ export type ContainerType =
   | 'verification_panel'
   | 'announcement';
 
+import type { ContainerBlock } from './blocks.js';
+
 /** Interface base com os campos de identidade visual comuns a todos os containers */
 export interface BaseContainerPayload {
   title?: string;
   description?: string;
   accentColor?: string; // Cor em formato Hex (ex: #5865f2)
-  bannerUrl?: string; // Imagem do banner/media gallery
+  bannerUrl?: string; // Imagem do banner/media gallery (para legado / fallback)
   renderMode?: 'embed' | 'container'; // Modo de renderização (Seção 19)
+
+  // Modo Embed Espelhado (Seção 20.1)
+  url?: string;
+  imageUrl?: string;
+  thumbnailUrl?: string;
+  authorName?: string;
+  authorIconUrl?: string;
+  footerText?: string;
+  footerIconUrl?: string;
+  showTimestamp?: boolean;
+  fields?: Array<{ name: string; value: string; inline?: boolean }>;
+
+  // Modo Container Blocos (Seção 20.2)
+  blocks?: ContainerBlock[];
   
   // Customização de Webhook (Pro/Business)
   customWebhook?: {

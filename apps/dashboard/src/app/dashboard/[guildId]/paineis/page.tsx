@@ -95,8 +95,22 @@ export default async function PaineisPage({
   }
 
   const channels = rawChannels
-    .filter((c: any) => c.type === 0 || c.type === 4 || c.type === 5) // Canais de texto e anúncios
+    .filter((c: any) => c.type === 0 || c.type === 5) // Apenas canais de texto e anúncios (Seção 20.4)
     .map((c: any) => ({ id: c.id, name: c.name }));
+
+  // 5. Busca identidade real do bot para o live preview (Seção 20.3)
+  let botIdentity = { username: 'Dave', avatarURL: '' };
+  try {
+    const botRes = await apiRequest<{ username: string; avatarURL: string | null }>('/bot/identity');
+    if (botRes) {
+      botIdentity = {
+        username: botRes.username,
+        avatarURL: botRes.avatarURL || '',
+      };
+    }
+  } catch (error) {
+    console.error('[PaineisPage] Erro ao carregar identidade do bot:', error);
+  }
 
   const activeSub = guildDetail?.subscriptions?.[0] || null;
   const currentPlanCode = activeSub?.status === 'ACTIVE' || activeSub?.status === 'TRIALING'
@@ -121,6 +135,7 @@ export default async function PaineisPage({
       channels={channels}
       currentPlanCode={currentPlanCode}
       planFeatures={planFeatures}
+      botIdentity={botIdentity}
     />
   );
 }

@@ -280,6 +280,23 @@ guildsRoutes.post('/:id/containers', async (c) => {
     return c.json({ error: 'channelId, type e payload são obrigatórios.' }, 400);
   }
 
+  // Valida o canal com a API do Discord (Seção 20.4)
+  try {
+    const channelRes = await fetch(`https://discord.com/api/v10/channels/${body.channelId}`, {
+      headers: { Authorization: `Bot ${env.DISCORD_TOKEN}` },
+    });
+    if (!channelRes.ok) {
+      return c.json({ error: 'Canal inválido ou não encontrado no Discord.' }, 400);
+    }
+    const channelData = (await channelRes.json()) as { type: number };
+    // Permitir apenas tipo 0 (GuildText) e tipo 5 (GuildAnnouncement)
+    if (channelData.type !== 0 && channelData.type !== 5) {
+      return c.json({ error: 'O canal selecionado não aceita postagens (categorias ou canais inválidos).' }, 400);
+    }
+  } catch (err) {
+    console.error('[API] Erro ao validar tipo do canal com Discord:', err);
+  }
+
   // Desativa os anteriores do mesmo tipo e canal
   await prisma.guildContainer.updateMany({
     where: {

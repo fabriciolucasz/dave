@@ -53,6 +53,7 @@ interface PaineisListProps {
   channels: Array<{ id: string; name: string }>;
   currentPlanCode: string;
   planFeatures: PlanFeatures;
+  botIdentity?: { username: string; avatarURL: string };
 }
 
 const ICON_MAP: Record<string, React.ComponentType<any>> = {
@@ -71,6 +72,7 @@ export function PaineisList({
   channels,
   currentPlanCode,
   planFeatures,
+  botIdentity,
 }: PaineisListProps) {
   const [containers, setContainers] = useState<ContainerItem[]>(initialContainers);
   const [activeConfigType, setActiveConfigType] = useState<string | null>(null);
@@ -137,6 +139,7 @@ export function PaineisList({
             planFeatures={planFeatures}
             currentPlanCode={currentPlanCode}
             onSaveSuccess={handleSaveSuccess}
+            botIdentity={botIdentity}
           />
         </div>
       </div>

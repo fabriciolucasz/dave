@@ -1,8 +1,8 @@
 // apps/dashboard/src/app/dashboard/[guildId]/paineis/PanelConfigForm.tsx
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Sparkles, Save, Eye, LayoutGrid } from 'lucide-react';
+import React, { useState } from 'react';
+import { Sparkles, Save, Eye } from 'lucide-react';
 import { saveContainer } from './actions';
 import Link from 'next/link';
 
@@ -28,6 +28,30 @@ interface PanelConfigFormProps {
   onSaveSuccess: (saved: any) => void;
 }
 
+const getAvailablePlaceholders = (type: string): string[] => {
+  switch (type) {
+    case 'welcome':
+      return ['welcomeUser', 'serverName', 'memberCount'];
+    case 'ticket_panel':
+    case 'rules_panel':
+    case 'verification_panel':
+      return ['serverName'];
+    case 'announcement':
+      return ['serverName', 'authorName'];
+    default:
+      return [];
+  }
+};
+
+const resolvePlaceholders = (text: string, context: Record<string, string>): string => {
+  if (!text) return text;
+  let resolved = text;
+  for (const [key, value] of Object.entries(context)) {
+    resolved = resolved.split(`\${${key}}`).join(value);
+  }
+  return resolved;
+};
+
 export function PanelConfigForm({
   guildId,
   channels,
@@ -43,6 +67,7 @@ export function PanelConfigForm({
   const initialPayload = existingContainer?.payload || {};
 
   // Form States
+  const [renderMode, setRenderMode] = useState<'embed' | 'container'>(initialPayload.renderMode || 'embed');
   const [title, setTitle] = useState(initialPayload.title || '');
   const [description, setDescription] = useState(initialPayload.description || '');
   const [accentColor, setAccentColor] = useState(initialPayload.accentColor || '#5865f2');
@@ -64,6 +89,37 @@ export function PanelConfigForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const placeholders = getAvailablePlaceholders(panelType.type);
+
+  const insertPlaceholder = (fieldId: string, placeholder: string, setValue: React.Dispatch<React.SetStateAction<string>>) => {
+    const input = document.getElementById(fieldId) as HTMLInputElement | HTMLTextAreaElement | null;
+    if (!input) {
+      setValue((prev) => prev + `\${${placeholder}}`);
+      return;
+    }
+    const start = input.selectionStart || 0;
+    const end = input.selectionEnd || 0;
+    const text = input.value;
+    const before = text.substring(0, start);
+    const after = text.substring(end, text.length);
+    const newValue = before + `\${${placeholder}}` + after;
+    setValue(newValue);
+    
+    // Devolve o foco e ajusta o cursor
+    setTimeout(() => {
+      input.focus();
+      const newPos = start + placeholder.length + 3; // 3 é o tamanho de `${}`
+      input.setSelectionRange(newPos, newPos);
+    }, 0);
+  };
+
+  const mockContext = {
+    welcomeUser: '@Fulano',
+    serverName: 'Nome do Servidor (Preview)',
+    memberCount: '1,234',
+    authorName: 'Administrador',
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!channelId && isSticky) {
@@ -81,6 +137,7 @@ export function PanelConfigForm({
       description,
       accentColor,
       bannerUrl: bannerUrl || undefined,
+      renderMode,
     };
 
     // Injeta customWebhook somente se for Pro
@@ -133,8 +190,40 @@ export function PanelConfigForm({
           <div style={styles.sectionHeader}>Visual & Estética</div>
 
           <div className="form-group">
+            <label className="form-label">Modo de Renderização</label>
+            <div style={styles.toggleGroup}>
+              <button
+                type="button"
+                onClick={() => setRenderMode('embed')}
+                style={{
+                  ...styles.toggleBtn,
+                  ...(renderMode === 'embed' ? styles.toggleBtnActive : {}),
+                }}
+              >
+                Embed Tradicional
+              </button>
+              <button
+                type="button"
+                onClick={() => setRenderMode('container')}
+                style={{
+                  ...styles.toggleBtn,
+                  ...(renderMode === 'container' ? styles.toggleBtnActive : {}),
+                }}
+              >
+                Layout de Container
+              </button>
+            </div>
+            <p style={styles.helpText}>
+              {renderMode === 'embed'
+                ? 'Estilo clássico do Discord com faixa colorida na lateral esquerda.'
+                : 'Design moderno (Components v2) com seções e mídias integradas em destaque.'}
+            </p>
+          </div>
+
+          <div className="form-group">
             <label className="form-label">Título do Painel</label>
             <input
+              id="field-title"
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -142,11 +231,26 @@ export function PanelConfigForm({
               className="form-control"
               required
             />
+            {placeholders.length > 0 && (
+              <div style={styles.placeholdersContainer}>
+                {placeholders.map((ph) => (
+                  <button
+                    type="button"
+                    key={ph}
+                    onClick={() => insertPlaceholder('field-title', ph, setTitle)}
+                    style={styles.placeholderBtn}
+                  >
+                    + {`\${${ph}}`}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="form-group">
             <label className="form-label">Descrição / Mensagem</label>
             <textarea
+              id="field-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Use markdown para formatar (ex: **negrito**, \`código\`)"
@@ -155,6 +259,20 @@ export function PanelConfigForm({
               style={{ resize: 'vertical' }}
               required
             />
+            {placeholders.length > 0 && (
+              <div style={styles.placeholdersContainer}>
+                {placeholders.map((ph) => (
+                  <button
+                    type="button"
+                    key={ph}
+                    onClick={() => insertPlaceholder('field-description', ph, setDescription)}
+                    style={styles.placeholderBtn}
+                  >
+                    + {`\${${ph}}`}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div style={styles.row}>
@@ -211,12 +329,27 @@ export function PanelConfigForm({
             <div className="form-group">
               <label className="form-label">Texto do Botão Interativo</label>
               <input
+                id="field-buttonLabel"
                 type="text"
                 value={buttonLabel}
                 onChange={(e) => setButtonLabel(e.target.value)}
                 placeholder={panelType.type === 'ticket_panel' ? 'Criar Ticket' : 'Verificar-se'}
                 className="form-control"
               />
+              {placeholders.length > 0 && (
+                <div style={styles.placeholdersContainer}>
+                  {placeholders.map((ph) => (
+                    <button
+                      type="button"
+                      key={ph}
+                      onClick={() => insertPlaceholder('field-buttonLabel', ph, setButtonLabel)}
+                      style={styles.placeholderBtn}
+                    >
+                      + {`\${${ph}}`}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -347,22 +480,58 @@ export function PanelConfigForm({
               <span style={styles.discordTimestamp}>Hoje às 19:40</span>
             </div>
 
-            {/* Discord Embed */}
-            <div style={{ ...styles.discordEmbed, borderLeftColor: accentColor }}>
-              {title && <div style={styles.discordEmbedTitle}>{title}</div>}
-              {description && (
-                <div style={styles.discordEmbedDesc}>
-                  {description.split('\n').map((line: string, idx: number) => (
-                    <div key={idx}>{line}</div>
-                  ))}
-                </div>
-              )}
-              {bannerUrl && (
-                <div style={styles.discordEmbedImageWrapper}>
-                  <img src={bannerUrl} alt="Banner" style={styles.discordEmbedImage} />
-                </div>
-              )}
-            </div>
+            {/* Discord Embed vs Layout de Container */}
+            {renderMode === 'container' ? (
+              <div style={styles.discordContainerLayout}>
+                {title && (
+                  <div style={styles.discordContainerTitle}>
+                    {resolvePlaceholders(title, mockContext)}
+                  </div>
+                )}
+                {description && (
+                  <>
+                    <div style={styles.discordContainerSeparator} />
+                    <div style={styles.discordContainerDesc}>
+                      {resolvePlaceholders(description, mockContext)
+                        .split('\n')
+                        .map((line: string, idx: number) => (
+                          <div key={idx}>{line}</div>
+                        ))}
+                    </div>
+                  </>
+                )}
+                {bannerUrl && (
+                  <>
+                    <div style={styles.discordContainerSeparator} />
+                    <div style={styles.discordEmbedImageWrapper}>
+                      <img src={bannerUrl} alt="Banner" style={styles.discordEmbedImage} />
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div style={{ ...styles.discordEmbed, borderLeftColor: accentColor }}>
+                {title && (
+                  <div style={styles.discordEmbedTitle}>
+                    {resolvePlaceholders(title, mockContext)}
+                  </div>
+                )}
+                {description && (
+                  <div style={styles.discordEmbedDesc}>
+                    {resolvePlaceholders(description, mockContext)
+                      .split('\n')
+                      .map((line: string, idx: number) => (
+                        <div key={idx}>{line}</div>
+                      ))}
+                  </div>
+                )}
+                {bannerUrl && (
+                  <div style={styles.discordEmbedImageWrapper}>
+                    <img src={bannerUrl} alt="Banner" style={styles.discordEmbedImage} />
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Discord Buttons */}
             {(panelType.type === 'ticket_panel' || panelType.type === 'verification_panel') && (
@@ -373,7 +542,9 @@ export function PanelConfigForm({
                     backgroundColor: panelType.type === 'ticket_panel' ? '#5865f2' : '#248046',
                   }}
                 >
-                  {buttonLabel || (panelType.type === 'ticket_panel' ? 'Criar Ticket' : 'Verificar-se')}
+                  {buttonLabel
+                    ? resolvePlaceholders(buttonLabel, mockContext)
+                    : (panelType.type === 'ticket_panel' ? 'Criar Ticket' : 'Verificar-se')}
                 </div>
               </div>
             )}
@@ -643,5 +814,78 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#f2f3f5',
     fontWeight: 500,
     cursor: 'pointer',
+  },
+  toggleGroup: {
+    display: 'flex',
+    background: 'rgba(0, 0, 0, 0.2)',
+    padding: '4px',
+    borderRadius: '8px',
+    border: '1px solid var(--border)',
+    gap: '4px',
+  },
+  toggleBtn: {
+    flex: 1,
+    padding: '10px',
+    background: 'none',
+    border: 'none',
+    borderRadius: '6px',
+    color: '#949ba4',
+    fontSize: '13px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+  },
+  toggleBtnActive: {
+    background: '#5865f2',
+    color: '#ffffff',
+    boxShadow: '0 2px 8px rgba(88, 101, 242, 0.3)',
+  },
+  helpText: {
+    fontSize: '12px',
+    color: '#6e7681',
+    marginTop: '6px',
+  },
+  placeholdersContainer: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '6px',
+    marginTop: '8px',
+  },
+  placeholderBtn: {
+    fontSize: '11px',
+    background: 'rgba(255, 255, 255, 0.03)',
+    border: '1px solid var(--border)',
+    borderRadius: '4px',
+    color: '#f2f3f5',
+    padding: '4px 8px',
+    cursor: 'pointer',
+    fontFamily: 'monospace',
+    transition: 'all 0.1s ease',
+  },
+  discordContainerLayout: {
+    background: '#2b2d31',
+    borderRadius: '8px',
+    padding: '16px',
+    display: 'flex',
+    flexDirection: 'column',
+    maxWidth: '450px',
+    border: '1px solid rgba(255, 255, 255, 0.05)',
+  },
+  discordContainerTitle: {
+    color: '#ffffff',
+    fontSize: '16px',
+    fontWeight: 800,
+    lineHeight: '1.3',
+  },
+  discordContainerSeparator: {
+    height: '1px',
+    background: 'rgba(255, 255, 255, 0.06)',
+    margin: '12px 0',
+  },
+  discordContainerDesc: {
+    color: '#dbdee1',
+    fontSize: '14px',
+    lineHeight: '1.5',
+    whiteSpace: 'pre-wrap',
   },
 };

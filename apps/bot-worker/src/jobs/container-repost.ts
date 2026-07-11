@@ -72,6 +72,7 @@ export async function handleContainerRepost(data: ContainerRepostJobData): Promi
 
     const container = await prisma.guildContainer.findUnique({
       where: { id: containerId },
+      include: { guild: true },
     });
 
     if (!container || !container.isActive) {
@@ -94,7 +95,32 @@ export async function handleContainerRepost(data: ContainerRepostJobData): Promi
 
       if (isStructured) {
         console.log(`[ContainerRepost] Renderizando ContainerPayload estruturado (tipo: ${container.type}) para formato do Discord API`);
-        discordPayload = buildContainerDiscordPayload(structuredPayload);
+        
+        // Busca detalhes da Guild do Discord API para resolver as variáveis dinâmicas
+        let guildName = container.guild.name;
+        let memberCountStr = '0';
+
+        try {
+          const guildDetails = (await rest.get(Routes.guild(container.guild.discordId), {
+            query: new URLSearchParams({ with_counts: 'true' }),
+          })) as { name: string; approximate_member_count?: number };
+
+          guildName = guildDetails.name;
+          if (guildDetails.approximate_member_count !== undefined) {
+            memberCountStr = guildDetails.approximate_member_count.toLocaleString('pt-BR');
+          }
+        } catch (guildErr) {
+          console.warn(`[ContainerRepost] Falha ao buscar detalhes da Guild ${container.guild.discordId} do Discord API. Usando DB fallback.`, guildErr);
+        }
+
+        const placeholdersContext: Record<string, string> = {
+          welcomeUser: '@membro',
+          serverName: guildName,
+          memberCount: memberCountStr,
+          authorName: 'Administração',
+        };
+
+        discordPayload = buildContainerDiscordPayload(structuredPayload, placeholdersContext);
       }
 
       // Se houver configuração de webhook customizado, tenta enviar via Webhook do Discord

@@ -416,7 +416,14 @@ guildsRoutes.post('/:id/containers/preview', async (c) => {
     return c.json({ error: 'payload é obrigatório.' }, 400);
   }
 
-  const rendered = buildContainerDiscordPayload(body.payload);
+  const mockContext: Record<string, string> = {
+    welcomeUser: '@Fulano',
+    serverName: 'Nome do Servidor (Preview)',
+    memberCount: '1,234',
+    authorName: user.username || 'Administrador',
+  };
+
+  const rendered = buildContainerDiscordPayload(body.payload, mockContext);
   return c.json({ rendered });
 });
 

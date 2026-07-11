@@ -183,7 +183,10 @@ export function PaineisList({
 
               {isConfigured && activeContainer && (
                 <div style={styles.configuredInfo}>
-                  <strong>Canal:</strong> #{getChannelName(activeContainer.channelId)}
+                  <div><strong>Canal:</strong> #{getChannelName(activeContainer.channelId)}</div>
+                  <div style={{ marginTop: '4px', fontSize: '11px' }}>
+                    <strong>Renderização:</strong> <span style={{ textTransform: 'capitalize' }}>{activeContainer.payload?.renderMode || 'embed'}</span>
+                  </div>
                 </div>
               )}
 
@@ -226,6 +229,7 @@ export function PaineisList({
                 <tr style={styles.trHead}>
                   <th style={styles.th}>Painel</th>
                   <th style={styles.th}>Canal</th>
+                  <th style={styles.th}>Renderização</th>
                   <th style={styles.th}>Mensagem ID</th>
                   <th style={styles.th}>Ações</th>
                 </tr>
@@ -242,6 +246,11 @@ export function PaineisList({
                         </td>
                         <td style={styles.td}>
                           <span style={{ fontWeight: 600 }}>#{getChannelName(c.channelId)}</span>
+                        </td>
+                        <td style={styles.td}>
+                          <span className="badge badge-active" style={{ textTransform: 'capitalize', fontSize: '11px', fontWeight: 600 }}>
+                            {c.payload?.renderMode || 'embed'}
+                          </span>
                         </td>
                         <td style={styles.td}>
                           <code style={styles.code}>{c.messageId || 'Aguardando repost...'}</code>

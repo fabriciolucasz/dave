@@ -72,3 +72,4 @@ export type {
   ContainerPayload,
 } from './containers/types.js';
 export { buildContainerDiscordPayload } from './containers/renderer.js';
+export { getAvailablePlaceholders, resolvePlaceholders } from './containers/placeholders.js';

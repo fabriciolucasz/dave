@@ -356,6 +356,8 @@ Copie `.env.example` para `.env` e preencha as variáveis antes de rodar `docker
 - [x] Tela `/account`
 - [x] Estados de loading/vazio/erro de permissão/assinatura vencida em todas as telas — ver seção 16.3
 - [ ] Após dashboard pronto: adicionar link na DM de boas-vindas do `guildCreate`
+- [ ] Escolha de renderização (Embed vs Container) por painel — ver seção 19
+- [ ] Sistema de variáveis dinâmicas nos campos de texto dos painéis — ver seção 19
 
 ### 14.2 Pagamentos ao vivo
 - [ ] Configurar webhooks Mercado Pago em produção
@@ -406,7 +408,7 @@ A seção 14.1 lista o que falta implementar; esta seção detalha o **comportam
 Um gestor pode ter acesso a múltiplos servidores — a navegação precisa refletir isso:
 
 - **Guild switcher** fixo no topo (dropdown com ícone + nome do servidor). Trocar o servidor selecionado muda o contexto de toda a navegação abaixo sem recarregar a página (client-side, mantendo a sessão).
-- **Sidebar lateral** com as seções por servidor: Visão geral, Configurações, Containers, Assinatura.
+- **Sidebar lateral** com as seções por servidor: Visão geral, Configurações, Painéis, Assinatura.
 - Se o usuário não tem acesso a nenhum servidor com o bot instalado, a sidebar não aparece — vai direto para a tela de "adicionar o bot".
 
 ### 16.2 Telas
@@ -415,19 +417,18 @@ Um gestor pode ter acesso a múltiplos servidores — a navegação precisa refl
 |---|---|---|
 | `/login` | Autenticação | Só o botão "Continuar com Discord". Sem alternativa de senha/formulário. |
 | `/dashboard` | Roteamento pós-login | 1 servidor → redireciona direto para `overview`. Múltiplos → grade de cards (ícone, nome, badge de status: ativo / assinatura vencida / não configurado). Zero → tela de convite do bot (botão de link OAuth2 de instalação). |
-| `/dashboard/[guildId]/overview` | Home do servidor | Status da assinatura (badge), canal/roles configurados, contagem de containers ativos, atalhos para as outras telas. |
+| `/dashboard/[guildId]/overview` | Home do servidor | Status da assinatura (badge), canal/roles configurados, contagem de painéis ativos, atalhos para as outras telas. |
 | `/dashboard/[guildId]/settings` | Configuração | Espelha o wizard `/setup` do Discord como formulário: select de canal padrão, multi-select de roles permitidas. Salva via `POST /guilds/:guildId/setup` — mesmo endpoint usado pelo comando, então mudança aqui reflete no bot imediatamente. |
-| `/dashboard/[guildId]/containers` | Containers ativos | Tabela: tipo, canal, status ativo/inativo, botão de desativar. **Sem criação pelo dashboard na v1** — criação continua via `/container create` no Discord, evitando duplicar a lógica de renderização de container no frontend. |
-| `/dashboard/[guildId]/subscription` | Assinatura | Status do plano, data de renovação, botões Assinar/Trocar de plano/Cancelar. Botão de cancelar só fica habilitado se o usuário logado for o `createdByUserId` ou o dono do servidor (mesma regra do endpoint, seção 10.1) — outros admins veem o botão desabilitado com tooltip explicando o motivo. |
+| `/dashboard/[guildId]/paineis` | Painéis (identidade visual de funções existentes) | Visualização, criação, edição e exclusão, com split layout e preview em tempo real do que vai aparecer no Discord. Ver seção 18 e 19. |
+| `/dashboard/[guildId]/subscription` | Assinatura | Status do plano, data de renovação, botões Assinar/Trocar de plano/Cancelar, listagem dinâmica de planos com features formatadas. Botão de cancelar só fica habilitado se o usuário logado for o `createdByUserId` ou o dono do servidor (mesma regra do endpoint, seção 10.1) — outros admins veem o botão desabilitado com tooltip explicando o motivo. |
 | `/account` | Perfil | Dados vindos do Discord (avatar, username), sem campos editáveis — a fonte da verdade é o Discord. |
 
 ### 16.3 Estados obrigatórios em toda tela
 
 - **Loading**: skeleton com o formato do conteúdo real da tela, não um spinner genérico.
-- **Vazio**: ex. zero containers → texto explicando como criar um pelo Discord, sem tratar como erro.
+- **Vazio**: ex. zero painéis configurados → texto explicando como criar um pelo dashboard/Discord, sem tratar como erro.
 - **Erro de permissão**: se a permissão do usuário mudou no Discord entre a sincronização e a ação, a API retorna `403` e a UI mostra "Sua permissão pode ter mudado, atualize a página" em vez de travar silenciosamente.
 - **Assinatura vencida**: banner persistente no topo do dashboard daquele servidor (não modal bloqueante), com CTA para renovar — espelha o princípio do `checkSubscription` do bot (seção 11), mas no dashboard bloqueia a ação equivalente com o banner em vez de recusar o comando.
-
 
 ## 17. Estratégia de monetização e planos
 
@@ -445,8 +446,8 @@ Motivos:
 | | **Free** | **Pro** | **Business** |
 |---|---|---|---|
 | Preço | R$ 0 | mensal (valor a definir) | mensal, mais alto |
-| Containers ativos (identidade visual configurável) | 1 | Ilimitados | Ilimitados |
-| Webhook customizado (nome/avatar próprio no container) | ❌ | ✅ | ✅ |
+| Painéis ativos (identidade visual configurável) | 1 | Ilimitados | Ilimitados |
+| Webhook customizado (nome/avatar próprio no painel) | ❌ | ✅ | ✅ |
 | Prioridade de fila (BullMQ) | ❌ | ❌ | ✅ |
 | Administradores de billing (quem pode gerenciar a assinatura) | 1 (quem assinou) | 1 | Vários |
 | Suporte | Comunidade | Padrão | Prioritário |
@@ -461,28 +462,24 @@ Preço fixo por servidor (`Guild`), não por membro — consistente com o modelo
 - Ao expirar sem conversão, o middleware `checkSubscription` (seção 11) passa a tratar o servidor como Free — funcionalidades acima do limite Free ficam bloqueadas, não o bot inteiro.
 - É o principal gatilho de conversão: a staff já configurou e já depende do bot antes de ver qualquer cobrança.
 
-### 17.4 O que é "container" — reforço conceitual
+### 17.4 O que é "painel" (nome interno: container) — reforço conceitual
 
-Importante para o desenho do dashboard (seção 16) e para o discurso de venda: **container não é uma ferramenta genérica de criar embeds do zero**. É uma **camada de identidade visual aplicada a uma função que já existe no bot** (ex: painel de ticket, mensagem de boas-vindas, outro módulo futuro). O gestor escolhe cor, texto, e opcionalmente um webhook customizado (nome/avatar próprio) — a função passa a ser renderizada com essa identidade de forma persistente, até ele alterar de novo.
+Importante para o desenho do dashboard (seção 16) e para o discurso de venda: **painel não é uma ferramenta genérica de criar embeds do zero**. É uma **camada de identidade visual aplicada a uma função que já existe no bot** (ex: painel de ticket, mensagem de boas-vindas, outro módulo futuro). O gestor escolhe cor, texto, e opcionalmente um webhook customizado (nome/avatar próprio) — a função passa a ser renderizada com essa identidade de forma persistente, até ele alterar de novo.
 
 Isso já é modelado no schema atual (`guild_containers`, seção 13 — campos `type`, `payload`, `channelId`, `messageId`), onde `type` identifica *qual função* está sendo estilizada e `payload` guarda a configuração visual escolhida — não o conteúdo livre de um embed arbitrário.
-
-Implicações para o roadmap do dashboard (seção 16.2, tela `/dashboard/[guildId]/containers`): quando a criação/edição avançada for implementada ali (hoje limitada a desativar — v1), a UI deve deixar claro que o gestor está **personalizando a aparência de uma função existente**, não criando conteúdo novo do zero. Essa é a funcionalidade-bandeira do plano Pro — o gatilho de conversão mais forte do produto, mais relevante que qualquer limite numérico de comandos.
 
 ### 17.5 Impacto no modelo de dados
 
 - `Subscription` (seção 10.3) precisa de um campo para diferenciar trial de assinatura paga — ex: `status: TRIALING` (já previsto no enum `SubscriptionStatus`) e um `trialEndsAt` na `Guild` ou na própria `Subscription`, preenchido automaticamente no `guildCreate`.
-- `Plan.features` (JSON já previsto no schema) passa a carregar os limites por plano descritos na tabela 17.2 (ex: `maxActiveContainers`, `customWebhookEnabled`, `queuePriority`) — o middleware `checkSubscription` e o limite de containers ativos leem daqui, evitando hardcode de regras de negócio no código do bot.
+- `Plan.features` (JSON já previsto no schema) passa a carregar os limites por plano descritos na tabela 17.2 (ex: `maxActivePanels`, `customWebhookEnabled`, `queuePriority`) — o middleware `checkSubscription` e o limite de painéis ativos leem daqui, evitando hardcode de regras de negócio no código do bot.
 
-## 18. Tipos de container e formato do payload
+## 18. Tipos de painel e formato do payload
 
 Detalhamento da seção 17.4: quais funções do bot ganham a camada de identidade visual configurável, e o formato de dados de cada uma. Proposta em `packages/discord-kit/src/containers/types.ts`.
 
 ### 18.1 Princípio de design
 
-O `payload` de um container guarda **apenas identidade visual** (título, descrição, cor, banner, webhook customizado) — nunca a lógica de negócio da função que ele estiliza. Ex: o container `ticket_panel` guarda o texto do botão, mas a categoria/permissão de quem pode abrir ticket continua vivendo na configuração própria daquela feature (`TicketConfig`, fora do container). Isso evita que o sistema de container vire, na prática, um builder de conteúdo genérico — ele é estritamente uma camada de estilo sobre funções que já existem.
-
-Toda `ContainerIdentity` compartilha os mesmos campos base (`title`, `description`, `accentColor`, `bannerUrl`, `customWebhook`), o que permite que o `container.builder.ts` (seção 6.2) renderize qualquer tipo com a mesma lógica de composição visual — só o conteúdo funcional específico varia por `type`.
+O `payload` de um painel guarda **apenas identidade visual** (título, descrição, cor, banner, webhook customizado, e agora modo de renderização + variáveis — ver seção 19) — nunca a lógica de negócio da função que ele estiliza. Ex: o painel `ticket_panel` guarda o texto do botão, mas a categoria/permissão de quem pode abrir ticket continua vivendo na configuração própria daquela feature (`TicketConfig`, fora do painel).
 
 ### 18.2 Tipos propostos (v1)
 
@@ -494,8 +491,47 @@ Toda `ContainerIdentity` compartilha os mesmos campos base (`title`, `descriptio
 | `verification_panel` | Painel de verificação de entrada | Sim | `buttonLabel` |
 | `announcement` | Anúncio disparado sob demanda por staff | Não | `mentionRoleId` opcional |
 
-Lista não é exaustiva — novos `type` podem ser adicionados conforme novas funções do bot forem construídas; a união discriminada em `ContainerPayload` garante que cada novo tipo declare só os campos que fazem sentido pra ele.
-
 ### 18.3 `customWebhook` — a feature-bandeira do plano pago
 
-Quando definido, o container é enviado via webhook do Discord com nome/avatar próprios, em vez de aparecer como o bot — é a funcionalidade citada na seção 17.2/17.4 como principal gatilho de conversão para o plano Pro. Ausência de `customWebhook` faz o container usar a identidade padrão do bot. O middleware `checkSubscription` (seção 11) e o limite de `Plan.features.customWebhookEnabled` (seção 17.5) decidem se esse campo pode ser preenchido para aquele servidor.
+Quando definido, o painel é enviado via webhook do Discord com nome/avatar próprios, em vez de aparecer como o bot. Ausência de `customWebhook` faz o painel usar a identidade padrão do bot. O middleware `checkSubscription` e o limite de `Plan.features.customWebhookEnabled` decidem se esse campo pode ser preenchido para aquele servidor.
+
+## 19. Renderização Embed vs Container, e variáveis dinâmicas nos painéis
+
+### 19.1 Escolha de renderização (`renderMode`)
+
+Decisão: cada painel guarda um campo `renderMode: 'embed' | 'container'` no seu payload — o gestor escolhe, por painel, se ele é enviado como o `EmbedBuilder` tradicional ou como `ContainerBuilder` (Components v2).
+
+Motivo de deixar por painel, e não uma escolha global do servidor: os dois formatos têm trade-offs visuais diferentes (embed é mais compacto e familiar; container permite layout mais rico, com seções e mídia) e o gestor pode preferir um formato pro painel de boas-vindas e outro pro de regras, por exemplo.
+
+Impacto técnico:
+- `ContainerIdentity` (seção 18) ganha o campo `renderMode`.
+- `container.builder.ts` (seção 6.2) e `embed.builder.ts` (seção 6.1) passam a compartilhar a mesma função de composição de conteúdo (título, descrição, cor, variáveis resolvidas — seção 19.2), cada um só troca a camada final de output (`EmbedBuilder` vs `ContainerBuilder`). Evita duplicar a lógica de resolução de variáveis em dois builders.
+- No dashboard, a tela de edição do painel (`/dashboard/[guildId]/paineis`, seção 16.2) ganha um seletor (toggle ou tabs "Embed" / "Container") no topo do formulário, e o preview em tempo real troca de formato junto.
+
+### 19.2 Variáveis dinâmicas nos campos de texto
+
+Decisão: cada `type` de painel expõe uma lista fixa de variáveis permitidas (não texto livre/eval), que o gestor pode inserir em qualquer posição dos campos de texto (`title`, `description`, `buttonLabel`, etc.) usando a sintaxe `${nomeDaVariavel}`.
+
+Exemplos por tipo:
+
+| `type` | Variáveis disponíveis |
+|---|---|
+| `welcome` | `${welcomeUser}` (menção do novo membro), `${serverName}`, `${memberCount}` |
+| `ticket_panel` | `${serverName}` |
+| `rules_panel` | `${serverName}` |
+| `verification_panel` | `${serverName}` |
+| `announcement` | `${serverName}`, `${authorName}` (quem disparou o anúncio) |
+
+Motivos do design:
+- **Lista fechada por tipo, não texto livre com eval**: cada `type` só permite as variáveis que fazem sentido pro contexto em que a mensagem é enviada — evita o gestor tentar usar `${welcomeUser}` num painel de regras (onde não existe "novo membro" no momento do envio) e evita qualquer risco de injeção, já que a resolução é um `replace` de chaves conhecidas, não interpretação de código.
+- **Posição livre dentro do texto**: a variável pode aparecer em qualquer lugar do `title`/`description` (não um campo separado tipo "saudação" + "resto da mensagem") — dá liberdade real de redação pro gestor.
+
+Implementação:
+- Registro de variáveis por `type` em `packages/discord-kit/src/containers/placeholders.ts`, exportando `getAvailablePlaceholders(type)` e `resolvePlaceholders(text, context)` — a mesma função usada tanto no `container.builder.ts`/`embed.builder.ts` (renderização real no Discord) quanto no endpoint de preview do dashboard (seção 16.2), garantindo que o preview bate exatamente com o resultado final.
+- `resolvePlaceholders` faz substituição simples de string (`${chave}` → valor do contexto), sem qualquer avaliação de expressão.
+- No dashboard, cada campo de texto do formulário de painel ganha um menu/botão "Inserir variável" que lista as opções válidas pro `type` selecionado e insere `${...}` na posição do cursor — evita o gestor precisar digitar a sintaxe de cabeça e elimina erro de digitação na chave.
+
+### 19.3 Impacto no modelo de dados
+
+- `ContainerIdentity` (seção 18.1) ganha `renderMode: 'embed' | 'container'`.
+- Nenhuma migration de schema necessária além disso — `payload` já é `Json` livre em `guild_containers` (seção 13), então `renderMode` e o texto com `${variaveis}` cabem no formato existente.

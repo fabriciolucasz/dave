@@ -18,6 +18,7 @@ export interface BaseContainerPayload {
   description?: string;
   accentColor?: string; // Cor em formato Hex (ex: #5865f2)
   bannerUrl?: string; // Imagem do banner/media gallery
+  renderMode?: 'embed' | 'container'; // Modo de renderização (Seção 19)
   
   // Customização de Webhook (Pro/Business)
   customWebhook?: {

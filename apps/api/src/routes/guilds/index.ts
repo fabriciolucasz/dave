@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
 import { prisma, type Prisma } from '@dave/database';
 import { authMiddleware } from '../../middlewares/auth.js';
-import { containerRepostQueue } from '@dave/queue';
+import { containerRepostQueue, redis } from '@dave/queue';
 import { env } from '@dave/config';
-import { buildContainerDiscordPayload } from '@dave/discord-kit';
+import { buildContainerDiscordPayload, adjustItemQuantity, logFeatureEvent } from '@dave/discord-kit';
 
 // ---------------------------------------------------------------------------
 // routes/guilds/index.ts — CRUD de guilds e suas configurações
@@ -39,6 +39,7 @@ guildsRoutes.get('/', async (c) => {
           name: true,
           iconHash: true,
           isActive: true,
+          botPresent: true,
         },
       },
     },
@@ -400,6 +401,41 @@ guildsRoutes.get('/:id/containers/types', async (c) => {
       isSticky: false,
       description: 'Mensagem de anúncio disparada sob demanda pela staff.',
     },
+    {
+      type: 'inventory_panel',
+      name: 'Baú (Inventário)',
+      icon: 'Archive',
+      isSticky: true,
+      description: 'Painel com botão para membros consultarem e movimentarem o inventário compartilhado da guilda.',
+    },
+    {
+      type: 'illegal_action_panel',
+      name: 'Ações Ilegais',
+      icon: 'Swords',
+      isSticky: true,
+      description: 'Painel com botão para registrar ações ilegais de RP, incluindo cidade, tipo, participantes e resultado.',
+    },
+    {
+      type: 'ranking_panel',
+      name: 'Ranking Semanal',
+      icon: 'Trophy',
+      isSticky: true,
+      description: 'Painel com o ranking semanal de ações concluídas, atualizado automaticamente a cada repostagem.',
+    },
+    {
+      type: 'weekly_goal_panel',
+      name: 'Metas Semanais',
+      icon: 'Target',
+      isSticky: true,
+      description: 'Painel com botão para membros registrarem a entrega de suas metas semanais.',
+    },
+    {
+      type: 'registration_panel',
+      name: 'Cadastro de Personagem',
+      icon: 'UserCheck',
+      isSticky: true,
+      description: 'Painel com botão para membros realizarem o cadastro/verificação de personagem.',
+    },
   ];
 
   return c.json({ types });
@@ -499,4 +535,700 @@ guildsRoutes.post('/:id/containers/:containerId/disable', async (c) => {
   });
 
   return c.json({ success: true });
+});
+
+// ---------------------------------------------------------------------------
+// Endpoints de Configurações de Log por Feature (Seção 25.4)
+// ---------------------------------------------------------------------------
+
+guildsRoutes.get('/:id/log-configs', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const configs = await prisma.featureLogConfig.findMany({
+    where: { guildId: membership.guildId },
+  });
+  return c.json({ configs });
+});
+
+guildsRoutes.post('/:id/log-configs', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const body = await c.req.json() as { feature: string; channelId: string };
+  if (!body.feature || !body.channelId) return c.json({ error: 'Campos feature e channelId são obrigatórios.' }, 400);
+
+  const config = await prisma.featureLogConfig.upsert({
+    where: {
+      guildId_feature: {
+        guildId: membership.guildId,
+        feature: body.feature,
+      },
+    },
+    update: { channelId: body.channelId },
+    create: {
+      guildId: membership.guildId,
+      feature: body.feature,
+      channelId: body.channelId,
+    },
+  });
+
+  return c.json({ config });
+});
+
+// ---------------------------------------------------------------------------
+// Endpoints de Inventário (Seção 22.4)
+// ---------------------------------------------------------------------------
+
+guildsRoutes.get('/:id/inventory/items', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const items = await prisma.inventoryItem.findMany({
+    where: { guildId: membership.guildId },
+    orderBy: { name: 'asc' },
+  });
+  return c.json({ items });
+});
+
+guildsRoutes.post('/:id/inventory/items', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const body = await c.req.json() as { name: string; description?: string; iconUrl?: string; initialQuantity?: number };
+  if (!body.name) return c.json({ error: 'Nome do item é obrigatório.' }, 400);
+
+  const item = await prisma.inventoryItem.create({
+    data: {
+      guildId: membership.guildId,
+      name: body.name,
+      description: body.description || null,
+      iconUrl: body.iconUrl || null,
+      currentQuantity: body.initialQuantity || 0,
+    },
+  });
+
+  if (body.initialQuantity && body.initialQuantity !== 0) {
+    await prisma.inventoryMovement.create({
+      data: {
+        itemId: item.id,
+        guildId: membership.guildId,
+        quantityDelta: body.initialQuantity,
+        resultingQuantity: body.initialQuantity,
+        performedByUserId: user.discordId,
+        reason: 'Saldo inicial do item',
+      },
+    });
+  }
+
+  return c.json({ item });
+});
+
+guildsRoutes.patch('/:id/inventory/items/:itemId', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const itemId = c.req.param('itemId');
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const body = await c.req.json() as { name?: string; description?: string; iconUrl?: string; isActive?: boolean };
+  const data: Record<string, any> = {};
+  if (body.name !== undefined) data.name = body.name;
+  if (body.description !== undefined) data.description = body.description;
+  if (body.iconUrl !== undefined) data.iconUrl = body.iconUrl;
+  if (body.isActive !== undefined) data.isActive = body.isActive;
+
+  const updated = await prisma.inventoryItem.update({
+    where: { id: itemId, guildId: membership.guildId },
+    data,
+  });
+  return c.json({ item: updated });
+});
+
+guildsRoutes.post('/:id/inventory/items/:itemId/movements', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const itemId = c.req.param('itemId');
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const body = await c.req.json() as { quantityDelta: number; reason?: string };
+  if (body.quantityDelta === undefined) return c.json({ error: 'quantityDelta é obrigatório.' }, 400);
+
+  const result = await adjustItemQuantity(
+    membership.guildId,
+    itemId,
+    body.quantityDelta,
+    user.discordId,
+    body.reason
+  );
+
+  return c.json(result);
+});
+
+guildsRoutes.get('/:id/inventory/items/:itemId/movements', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const itemId = c.req.param('itemId');
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const movements = await prisma.inventoryMovement.findMany({
+    where: { itemId, guildId: membership.guildId },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  });
+
+  return c.json({ movements });
+});
+
+// ---------------------------------------------------------------------------
+// Endpoints de Central de Ações & Metas Semanais (Seção 23.5)
+// ---------------------------------------------------------------------------
+
+guildsRoutes.get('/:id/central/actions', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const actions = await prisma.illegalAction.findMany({
+    where: { guildId: membership.guildId },
+    include: { participants: true },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+  });
+
+  return c.json({ actions });
+});
+
+guildsRoutes.post('/:id/central/actions', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const body = await c.req.json() as { outcome: 'WON' | 'LOST'; amount: number; participants: string[] };
+  if (!body.outcome || body.amount === undefined || !body.participants || body.participants.length === 0) {
+    return c.json({ error: 'outcome, amount e participants são obrigatórios.' }, 400);
+  }
+
+  const action = await prisma.$transaction(async (tx) => {
+    const act = await tx.illegalAction.create({
+      data: {
+        guildId: membership.guildId,
+        outcome: body.outcome,
+        amount: body.amount,
+        registeredByUserId: user.discordId,
+      },
+    });
+
+    const share = Math.floor(body.amount / body.participants.length);
+
+    await tx.illegalActionParticipant.createMany({
+      data: body.participants.map((discordUserId) => ({
+        actionId: act.id,
+        discordUserId,
+        shareAmount: share,
+      })),
+    });
+
+    return act;
+  });
+
+  // Invalida cache de ranking no Redis
+  const cacheKeyPattern = `ranking:${membership.guildId}:*`;
+  try {
+    const keys = await redis.keys(cacheKeyPattern);
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  } catch (err) {
+    console.error('Falha ao expirar cache do Redis:', err);
+  }
+
+  // Dispara log
+  const logPayload = {
+    embeds: [
+      {
+        title: `⚔️ Nova Ação Registrada`,
+        description: `Uma ação foi cadastrada pelo dashboard.`,
+        color: body.outcome === 'WON' ? 0x248046 : 0xda373c,
+        fields: [
+          { name: 'Resultado', value: body.outcome === 'WON' ? 'SUCESSO (WON)' : 'FALHA (LOST)', inline: true },
+          { name: 'Valor Total', value: `R$ ${body.amount.toLocaleString('pt-BR')}`, inline: true },
+          { name: 'Participantes', value: body.participants.map(p => `<@${p}>`).join(', '), inline: false },
+        ],
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  };
+  await logFeatureEvent(membership.guildId, 'CENTRAL', logPayload);
+
+  return c.json({ action });
+});
+
+guildsRoutes.get('/:id/central/goals', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const submissions = await prisma.weeklyGoalSubmission.findMany({
+    where: { guildId: membership.guildId },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+  });
+
+  return c.json({ submissions });
+});
+
+guildsRoutes.post('/:id/central/goals', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const body = await c.req.json() as { discordUserId: string; amountDelivered: number; weekStartDate: string };
+  if (!body.discordUserId || body.amountDelivered === undefined || !body.weekStartDate) {
+    return c.json({ error: 'discordUserId, amountDelivered e weekStartDate são obrigatórios.' }, 400);
+  }
+
+  const goal = await prisma.weeklyGoalSubmission.create({
+    data: {
+      guildId: membership.guildId,
+      discordUserId: body.discordUserId,
+      amountDelivered: body.amountDelivered,
+      weekStartDate: new Date(body.weekStartDate),
+      registeredByUserId: user.discordId,
+    },
+  });
+
+  // Invalida cache de ranking no Redis
+  const cacheKeyPattern = `ranking:${membership.guildId}:*`;
+  try {
+    const keys = await redis.keys(cacheKeyPattern);
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  } catch (err) {
+    console.error('Falha ao expirar cache do Redis:', err);
+  }
+
+  // Dispara log
+  const logPayload = {
+    embeds: [
+      {
+        title: `💰 Entrega de Meta Semanal`,
+        description: `Entrega registrada pelo dashboard.`,
+        color: 0x5865f2,
+        fields: [
+          { name: 'Membro', value: `<@${body.discordUserId}>`, inline: true },
+          { name: 'Valor Entregue', value: `R$ ${body.amountDelivered.toLocaleString('pt-BR')}`, inline: true },
+          { name: 'Semana de Referência', value: new Date(body.weekStartDate).toLocaleDateString('pt-BR'), inline: true },
+        ],
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  };
+  await logFeatureEvent(membership.guildId, 'CENTRAL', logPayload);
+
+  return c.json({ goal });
+});
+
+guildsRoutes.get('/:id/central/ranking', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const period = c.req.query('period') || 'week';
+  const cacheKey = `ranking:${membership.guildId}:${period}`;
+
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return c.json({ ranking: JSON.parse(cached), cached: true });
+    }
+  } catch (err) {
+    console.error('Falha ao obter cache do Redis:', err);
+  }
+
+  let dateLimit = new Date(0);
+  const now = new Date();
+  if (period === 'week') {
+    const day = now.getDay();
+    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+    dateLimit = new Date(now.setDate(diff));
+    dateLimit.setHours(0, 0, 0, 0);
+  } else if (period === 'month') {
+    dateLimit = new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+
+  const participantsGroup = await prisma.illegalActionParticipant.groupBy({
+    by: ['discordUserId'],
+    where: {
+      action: {
+        guildId: membership.guildId,
+        createdAt: { gte: dateLimit },
+        outcome: 'WON',
+      },
+    },
+    _sum: {
+      shareAmount: true,
+    },
+  });
+
+  const ranking = participantsGroup
+    .map(p => ({
+      discordUserId: p.discordUserId,
+      totalAmount: p._sum.shareAmount || 0,
+    }))
+    .sort((a, b) => b.totalAmount - a.totalAmount);
+
+  try {
+    await redis.set(cacheKey, JSON.stringify(ranking), 'EX', 300);
+  } catch (err) {
+    console.error('Falha ao definir cache do Redis:', err);
+  }
+
+  return c.json({ ranking, cached: false });
+});
+
+// ---------------------------------------------------------------------------
+// Endpoints do Sistema de Cadastro de Personagem (Seção 24.4)
+// ---------------------------------------------------------------------------
+
+guildsRoutes.get('/:id/registrations', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const registrations = await prisma.characterRegistration.findMany({
+    where: { guildId: membership.guildId },
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+  });
+
+  return c.json({ registrations });
+});
+
+guildsRoutes.post('/:id/registrations/:regId/review', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const regId = c.req.param('regId');
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const body = await c.req.json() as { status: 'VERIFIED' | 'REJECTED' };
+  if (!body.status || !['VERIFIED', 'REJECTED'].includes(body.status)) {
+    return c.json({ error: 'Status inválido. Deve ser VERIFIED ou REJECTED.' }, 400);
+  }
+
+  const registration = await prisma.characterRegistration.update({
+    where: { id: regId, guildId: membership.guildId },
+    data: { status: body.status },
+  });
+
+  // Envia log para o canal de log do cadastro
+  const logPayload = {
+    embeds: [
+      {
+        title: `📝 Cadastro Revisado Manualmente`,
+        description: `O cadastro do personagem de <@${registration.discordUserId}> foi revisado pela Staff no dashboard.`,
+        color: body.status === 'VERIFIED' ? 0x248046 : 0xda373c,
+        fields: [
+          { name: 'Personagem', value: registration.characterName, inline: true },
+          { name: 'ID do RP', value: `#${registration.characterServerId}`, inline: true },
+          { name: 'Status Final', value: body.status === 'VERIFIED' ? 'APROVADO (VERIFIED)' : 'REJEITADO (REJECTED)', inline: true },
+        ],
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  };
+  await logFeatureEvent(membership.guildId, 'REGISTRATION', logPayload);
+
+  return c.json({ registration });
+});
+
+// ===========================================================================
+// Localizações de Inventário (Baú) — seção 26.1
+// ===========================================================================
+
+/** Lista localizações de inventário da guild. */
+guildsRoutes.get('/:id/inventory/locations', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const locations = await prisma.inventoryLocation.findMany({
+    where: { guildId: membership.guildId },
+    include: { _count: { select: { items: true } } },
+    orderBy: { name: 'asc' },
+  });
+
+  return c.json({ locations });
+});
+
+/** Cria uma nova localização de inventário. */
+guildsRoutes.post('/:id/inventory/locations', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const body = await c.req.json() as { name: string; allowedRoleIds?: string[] };
+  if (!body.name?.trim()) {
+    return c.json({ error: 'Campo name é obrigatório.' }, 400);
+  }
+
+  const location = await prisma.inventoryLocation.create({
+    data: {
+      guildId: membership.guildId,
+      name: body.name.trim(),
+      allowedRoleIds: body.allowedRoleIds ?? [],
+    },
+  });
+
+  return c.json({ location }, 201);
+});
+
+/** Atualiza uma localização de inventário. */
+guildsRoutes.patch('/:id/inventory/locations/:locationId', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const locationId = c.req.param('locationId');
+
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const body = await c.req.json() as { name?: string; allowedRoleIds?: string[]; isActive?: boolean };
+
+  const location = await prisma.inventoryLocation.update({
+    where: { id: locationId, guildId: membership.guildId },
+    data: {
+      ...(body.name !== undefined && { name: body.name.trim() }),
+      ...(body.allowedRoleIds !== undefined && { allowedRoleIds: body.allowedRoleIds }),
+      ...(body.isActive !== undefined && { isActive: body.isActive }),
+    },
+  });
+
+  return c.json({ location });
+});
+
+/** Remove (desativa) uma localização de inventário. */
+guildsRoutes.delete('/:id/inventory/locations/:locationId', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const locationId = c.req.param('locationId');
+
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const location = await prisma.inventoryLocation.update({
+    where: { id: locationId, guildId: membership.guildId },
+    data: { isActive: false },
+  });
+
+  return c.json({ location });
+});
+
+// ===========================================================================
+// Cidades de Ações Ilegais — seção 26.2
+// ===========================================================================
+
+/** Lista cidades de ações ilegais da guild. */
+guildsRoutes.get('/:id/illegal-actions/cities', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const cities = await prisma.illegalActionCity.findMany({
+    where: { guildId: membership.guildId },
+    include: { _count: { select: { actionTypes: true, actions: true } } },
+    orderBy: { name: 'asc' },
+  });
+
+  return c.json({ cities });
+});
+
+/** Cria uma nova cidade. */
+guildsRoutes.post('/:id/illegal-actions/cities', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const body = await c.req.json() as { name: string };
+  if (!body.name?.trim()) {
+    return c.json({ error: 'Campo name é obrigatório.' }, 400);
+  }
+
+  const city = await prisma.illegalActionCity.create({
+    data: { guildId: membership.guildId, name: body.name.trim() },
+  });
+
+  return c.json({ city }, 201);
+});
+
+/** Atualiza uma cidade. */
+guildsRoutes.patch('/:id/illegal-actions/cities/:cityId', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const cityId = c.req.param('cityId');
+
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const body = await c.req.json() as { name?: string; isActive?: boolean };
+
+  const city = await prisma.illegalActionCity.update({
+    where: { id: cityId, guildId: membership.guildId },
+    data: {
+      ...(body.name !== undefined && { name: body.name.trim() }),
+      ...(body.isActive !== undefined && { isActive: body.isActive }),
+    },
+  });
+
+  return c.json({ city });
+});
+
+// ===========================================================================
+// Tipos de Ações Ilegais (vinculados à cidade) — seção 26.2
+// ===========================================================================
+
+/** Lista tipos de ação de uma cidade. */
+guildsRoutes.get('/:id/illegal-actions/cities/:cityId/types', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const cityId = c.req.param('cityId');
+
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const types = await prisma.illegalActionType.findMany({
+    where: { cityId, guildId: membership.guildId },
+    include: { _count: { select: { actions: true } } },
+    orderBy: { name: 'asc' },
+  });
+
+  return c.json({ types });
+});
+
+/** Cria um novo tipo de ação para uma cidade. */
+guildsRoutes.post('/:id/illegal-actions/cities/:cityId/types', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const cityId = c.req.param('cityId');
+
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  // Verifica que a cidade pertence à guild
+  const city = await prisma.illegalActionCity.findFirst({
+    where: { id: cityId, guildId: membership.guildId },
+  });
+  if (!city) return c.json({ error: 'Cidade não encontrada.' }, 404);
+
+  const body = await c.req.json() as { name: string; maxParticipants?: number };
+  if (!body.name?.trim()) {
+    return c.json({ error: 'Campo name é obrigatório.' }, 400);
+  }
+
+  const type = await prisma.illegalActionType.create({
+    data: {
+      cityId,
+      guildId: membership.guildId,
+      name: body.name.trim(),
+      maxParticipants: body.maxParticipants ?? null,
+    },
+  });
+
+  return c.json({ type }, 201);
+});
+
+/** Atualiza um tipo de ação. */
+guildsRoutes.patch('/:id/illegal-actions/cities/:cityId/types/:typeId', async (c) => {
+  const user = c.get('user');
+  const guildId = c.req.param('id');
+  const typeId = c.req.param('typeId');
+
+  const membership = await prisma.guildMember.findFirst({
+    where: { userId: user.id, guild: { discordId: guildId }, isAdmin: true },
+  });
+  if (!membership) return c.json({ error: 'Acesso negado.' }, 403);
+
+  const body = await c.req.json() as { name?: string; maxParticipants?: number | null; isActive?: boolean };
+
+  const type = await prisma.illegalActionType.update({
+    where: { id: typeId, guildId: membership.guildId },
+    data: {
+      ...(body.name !== undefined && { name: body.name.trim() }),
+      ...(body.maxParticipants !== undefined && { maxParticipants: body.maxParticipants }),
+      ...(body.isActive !== undefined && { isActive: body.isActive }),
+    },
+  });
+
+  return c.json({ type });
 });

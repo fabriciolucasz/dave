@@ -127,6 +127,19 @@ client.on('guildCreate', async (guild) => {
   }
 });
 
+client.on('guildDelete', async (guild) => {
+  console.log(`[Gateway Shard] Bot removido do servidor: ${guild.id}`);
+  try {
+    const jobData: GuildOnboardingJobData = {
+      type: 'guild_offboarding',
+      guildId: guild.id,
+    };
+    await guildOnboardingQueue.add(`offboarding:${guild.id}`, jobData);
+  } catch (error) {
+    console.error('[Gateway Shard] Erro ao enfileirar offboarding:', error);
+  }
+});
+
 client.on('messageDelete', async (message) => {
   if (!message.guildId) return;
 

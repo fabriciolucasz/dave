@@ -146,7 +146,11 @@ authRoutes.get('/callback', async (c) => {
         const permsBigInt = BigInt(dg.permissions);
         const isAdmin = dg.owner || !!(permsBigInt & ADMINISTRATOR) || !!(permsBigInt & MANAGE_GUILD);
 
-        // Upserta a guild (caso ela ainda não exista no banco)
+        // Upserta a guild (caso ela ainda não exista no banco).
+        // Nunca escrever `botPresent` aqui: este upsert roda em todo login e cria
+        // rows de guild "fantasma" para qualquer servidor que o usuário administra
+        // no Discord, mesmo que o bot nunca tenha sido adicionado — e mesmo em
+        // update não deve reverter um valor real já gravado por handleGuildOnboarding.
         const guild = await prisma.guild.upsert({
           where: { discordId: dg.id },
           update: { name: dg.name, iconHash: dg.icon ?? null },

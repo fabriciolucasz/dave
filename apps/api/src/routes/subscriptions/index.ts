@@ -128,6 +128,10 @@ subscriptionsRoutes.post('/:guildId/checkout', async (c) => {
     return c.json({ error: 'Guild não encontrada ou acesso negado.' }, 404);
   }
 
+  if (!membership.guild.botPresent) {
+    return c.json({ error: 'O bot ainda não foi adicionado a este servidor.' }, 400);
+  }
+
   let body: { planId?: string };
   try {
     body = await c.req.json();

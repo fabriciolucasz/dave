@@ -360,6 +360,11 @@ async function handleGuildSync(userId?: string): Promise<void> {
         const permsBigInt = BigInt(dg.permissions);
         const isAdmin = dg.owner || !!(permsBigInt & ADMINISTRATOR) || !!(permsBigInt & MANAGE_GUILD);
 
+        // Nunca escrever `botPresent` aqui: este sync roda periodicamente a partir
+        // dos tokens salvos dos usuários e cria rows de guild "fantasma" para
+        // qualquer servidor que o usuário administra no Discord, mesmo que o bot
+        // nunca tenha sido adicionado — e mesmo em update não deve reverter um
+        // valor real já gravado por handleGuildOnboarding.
         const guild = await prisma.guild.upsert({
           where: { discordId: dg.id },
           update: { name: dg.name, iconHash: dg.icon ?? null },

@@ -1,24 +1,34 @@
 // apps/dashboard/src/app/dashboard/[guildId]/paineis/PaineisList.tsx
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Hand,
   Ticket,
   ScrollText,
   ShieldCheck,
   Megaphone,
-  CircleCheck,
-  CircleAlert,
+  Archive,
+  Swords,
+  Trophy,
+  Target,
+  UserCheck,
   ArrowLeft,
   Pencil,
   Power,
   Inbox,
-  Sparkles,
-  Check,
 } from 'lucide-react';
 import { disableContainer, saveContainer, getContainerPreview } from './actions';
 import { PanelConfigForm } from './PanelConfigForm';
+import {
+  NotchedCard,
+  NotchedCardContent,
+  NotchedCardFooter,
+  NotchedCardHeader,
+} from '@/components/NotchedCard';
+import { StatusStamp } from '@/components/StatusStamp';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 interface ContainerItem {
   id: string;
@@ -57,11 +67,32 @@ interface PaineisListProps {
 }
 
 const ICON_MAP: Record<string, React.ComponentType<any>> = {
-  Hand: Hand,
-  Ticket: Ticket,
-  ScrollText: ScrollText,
-  ShieldCheck: ShieldCheck,
-  Megaphone: Megaphone,
+  Hand,
+  Ticket,
+  ScrollText,
+  ShieldCheck,
+  Megaphone,
+  Archive,
+  Swords,
+  Trophy,
+  Target,
+  UserCheck,
+};
+
+// Espelha os labels padrão de `resolveActionButton` (packages/discord-kit/src/containers/renderer.ts)
+// para que a mini prévia nunca fique fora de sincronia com o que é realmente postado no Discord.
+// `null` = o tipo não tem botão de ação.
+const TYPE_PREVIEW_BUTTON: Record<string, string | null> = {
+  welcome: null,
+  ticket_panel: 'Criar Ticket',
+  rules_panel: null,
+  verification_panel: 'Verificar-se',
+  announcement: null,
+  inventory_panel: 'Ver Baú',
+  illegal_action_panel: 'Registrar Ação',
+  ranking_panel: null,
+  weekly_goal_panel: 'Registrar Meta',
+  registration_panel: 'Cadastrar Personagem',
 };
 
 export function PaineisList({
@@ -121,343 +152,187 @@ export function PaineisList({
 
     return (
       <div className="animate-fade-in">
-        <button
-          onClick={() => setActiveConfigType(null)}
-          className="btn btn-secondary"
-          style={styles.backBtn}
-        >
+        <Button variant="outline" onClick={() => setActiveConfigType(null)} className="mb-5">
           <ArrowLeft size={16} aria-hidden="true" /> Voltar para Painéis
-        </button>
+        </Button>
 
-        <div className="card-glass" style={styles.formContainer}>
-          <PanelConfigForm
-            guildId={guildId}
-            guildName={guildName}
-            channels={channels}
-            panelType={selectedType}
-            existingContainer={existingContainer}
-            planFeatures={planFeatures}
-            currentPlanCode={currentPlanCode}
-            onSaveSuccess={handleSaveSuccess}
-            botIdentity={botIdentity}
-          />
-        </div>
+        <NotchedCard>
+          <NotchedCardContent className="pt-6">
+            <PanelConfigForm
+              guildId={guildId}
+              guildName={guildName}
+              channels={channels}
+              panelType={selectedType}
+              existingContainer={existingContainer}
+              planFeatures={planFeatures}
+              currentPlanCode={currentPlanCode}
+              onSaveSuccess={handleSaveSuccess}
+              botIdentity={botIdentity}
+            />
+          </NotchedCardContent>
+        </NotchedCard>
       </div>
     );
   }
 
   return (
-    <div className="animate-fade-in" style={styles.container}>
-      <div style={styles.headerBlock}>
-        <h2 style={styles.title}>Painéis de Identidade Visual</h2>
-        <p style={styles.description}>
+    <div className="flex animate-fade-in flex-col gap-8">
+      <div className="mb-2 border-b border-border pb-4">
+        <h2 className="font-display text-xl font-extrabold text-foreground">Painéis de Identidade Visual</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
           Personalize a identidade visual e o comportamento das mensagens fixas do bot em seu servidor.
         </p>
       </div>
 
       {/* Grid de Cards de Tipos de Painel */}
-      <div style={styles.grid}>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-6">
         {panelTypes.map((type) => {
           const IconComponent = ICON_MAP[type.icon] || Hand;
           const activeContainer = activeContainersByType.get(type.type);
           const isConfigured = !!activeContainer;
+          const previewButtonLabel = TYPE_PREVIEW_BUTTON[type.type];
+          const isRanking = type.type === 'ranking_panel';
 
           return (
-            <div key={type.type} className="card-glass" style={styles.card}>
-              <div style={styles.cardHeader}>
-                <div style={styles.iconWrapper}>
-                  <IconComponent size={24} style={{ color: '#ffffff' }} />
+            <NotchedCard key={type.type} className="flex h-full min-h-[280px] flex-col">
+              <NotchedCardHeader className="flex-row items-center justify-between space-y-0 pb-2">
+                <div className="flex h-10 w-10 items-center justify-center rounded-md border border-primary/25 bg-primary/15">
+                  <IconComponent size={22} className="text-primary" aria-hidden="true" />
                 </div>
-                <span
-                  className={`badge ${isConfigured ? 'badge-active' : 'badge-inactive'}`}
-                  style={styles.badge}
-                >
-                  {isConfigured ? (
-                    <>
-                      <CircleCheck size={12} aria-hidden="true" style={{ marginRight: '4px' }} /> Ativo
-                    </>
-                  ) : (
-                    <>
-                      <CircleAlert size={12} aria-hidden="true" style={{ marginRight: '4px' }} /> Inativo
-                    </>
-                  )}
-                </span>
-              </div>
+                <StatusStamp variant={isConfigured ? 'active' : 'inactive'}>
+                  {isConfigured ? 'Ativo' : 'Inativo'}
+                </StatusStamp>
+              </NotchedCardHeader>
 
-              <h3 style={styles.cardTitle}>{type.name}</h3>
-              <p style={styles.cardDesc}>{type.description}</p>
+              <NotchedCardContent className="flex flex-1 flex-col">
+                <h3 className="mb-2 font-display text-base font-bold text-foreground">{type.name}</h3>
+                <p className="mb-4 flex-1 text-sm leading-relaxed text-muted-foreground">{type.description}</p>
 
-              {isConfigured && activeContainer && (
-                <div style={styles.configuredInfo}>
-                  <div><strong>Canal:</strong> #{getChannelName(activeContainer.channelId)}</div>
-                  <div style={{ marginTop: '4px', fontSize: '11px' }}>
-                    <strong>Renderização:</strong> <span style={{ textTransform: 'capitalize' }}>{activeContainer.payload?.renderMode || 'embed'}</span>
+                {/* Mini preview do painel — espelha os dados reais do tipo, sem cores fixas */}
+                <div className="mb-4 flex h-[100px] flex-col gap-2 overflow-hidden rounded-md border border-border bg-secondary/40 p-3">
+                  <div className="flex items-center border-l-2 border-primary pl-2">
+                    <span className="truncate text-[11px] font-bold text-foreground">{type.name}</span>
+                  </div>
+                  <div className="flex flex-1 flex-col justify-center gap-1.5">
+                    <div className="h-1 w-4/5 rounded-full bg-muted-foreground/20" />
+                    <div className="h-1 w-1/2 rounded-full bg-muted-foreground/15" />
+                    {previewButtonLabel ? (
+                      <div className="mt-1 self-start rounded bg-primary px-2 py-1 text-[10px] font-bold text-primary-foreground">
+                        {previewButtonLabel}
+                      </div>
+                    ) : isRanking ? (
+                      <div className="mt-1 self-start rounded border border-dashed border-border px-2 py-1 text-[10px] font-semibold italic text-muted-foreground">
+                        Conteúdo dinâmico
+                      </div>
+                    ) : null}
                   </div>
                 </div>
-              )}
 
-              <div style={styles.cardFooter}>
-                <button
-                  onClick={() => setActiveConfigType(type.type)}
-                  className="btn btn-primary"
-                  style={styles.actionBtn}
-                >
+                {isConfigured && activeContainer && (
+                  <div className="mb-4 rounded bg-black/15 px-2.5 py-1.5 text-xs text-muted-foreground">
+                    <div>
+                      <strong className="text-foreground">Canal:</strong> #{getChannelName(activeContainer.channelId)}
+                    </div>
+                    <div className="mt-1 text-[11px]">
+                      <strong className="text-foreground">Renderização:</strong>{' '}
+                      <span className="capitalize">{activeContainer.payload?.renderMode || 'embed'}</span>
+                    </div>
+                  </div>
+                )}
+              </NotchedCardContent>
+
+              <NotchedCardFooter>
+                <Button onClick={() => setActiveConfigType(type.type)} className="w-full">
                   <Pencil size={14} aria-hidden="true" />
                   {isConfigured ? 'Editar Painel' : 'Configurar'}
-                </button>
-              </div>
-            </div>
+                </Button>
+              </NotchedCardFooter>
+            </NotchedCard>
           );
         })}
       </div>
 
       {/* Tabela de Painéis Ativos */}
-      <div className="card-glass" style={styles.tableCard}>
-        <h3 style={styles.tableTitle}>Painéis Ativos no Discord</h3>
-        <p style={styles.tableSubtitle}>
-          Lista de mensagens persistentes atualmente monitoradas pelo bot no seu servidor.
-        </p>
+      <NotchedCard>
+        <NotchedCardHeader>
+          <h3 className="font-display text-base font-extrabold text-foreground">Painéis Ativos no Discord</h3>
+          <p className="text-sm text-muted-foreground">
+            Lista de mensagens persistentes atualmente monitoradas pelo bot no seu servidor.
+          </p>
+        </NotchedCardHeader>
 
-        {containers.filter((c) => c.isActive).length === 0 ? (
-          <div style={styles.emptyContainer}>
-            <Inbox size={48} aria-hidden="true" style={{ color: '#6e7681', marginBottom: '16px' }} />
-            <h4 style={{ color: '#ffffff', fontSize: '16px', fontWeight: 700, marginBottom: '8px' }}>
-              Nenhum painel ativo
-            </h4>
-            <p style={{ color: '#949ba4', fontSize: '14px', maxWidth: '340px' }}>
-              Utilize os cards acima para configurar e postar o seu primeiro painel personalizado no servidor!
-            </p>
-          </div>
-        ) : (
-          <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: '8px' }}>
-            <table style={styles.table}>
-              <thead>
-                <tr style={styles.trHead}>
-                  <th style={styles.th}>Painel</th>
-                  <th style={styles.th}>Canal</th>
-                  <th style={styles.th}>Renderização</th>
-                  <th style={styles.th}>Mensagem ID</th>
-                  <th style={styles.th}>Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {containers
-                  .filter((c) => c.isActive)
-                  .map((c) => {
-                    const typeMeta = panelTypes.find((t) => t.type === c.type);
-                    return (
-                      <tr key={c.id} style={styles.trBody}>
-                        <td style={styles.td}>
-                          <span style={styles.panelName}>{typeMeta?.name || c.type}</span>
-                        </td>
-                        <td style={styles.td}>
-                          <span style={{ fontWeight: 600 }}>#{getChannelName(c.channelId)}</span>
-                        </td>
-                        <td style={styles.td}>
-                          <span className="badge badge-active" style={{ textTransform: 'capitalize', fontSize: '11px', fontWeight: 600 }}>
-                            {c.payload?.renderMode || 'embed'}
-                          </span>
-                        </td>
-                        <td style={styles.td}>
-                          <code style={styles.code}>{c.messageId || 'Aguardando repost...'}</code>
-                        </td>
-                        <td style={styles.td}>
-                          <div style={{ display: 'flex', gap: '8px' }}>
-                            <button
-                              onClick={() => setActiveConfigType(c.type)}
-                              className="btn btn-secondary"
-                              style={styles.tableActionBtn}
-                            >
-                              <Pencil size={12} aria-hidden="true" /> Editar
-                            </button>
-                            <button
-                              onClick={() => handleDisable(c.id)}
-                              disabled={disablingId === c.id}
-                              className="btn btn-danger"
-                              style={styles.tableActionBtn}
-                            >
-                              <Power size={12} aria-hidden="true" /> Desativar
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+        <NotchedCardContent>
+          {containers.filter((c) => c.isActive).length === 0 ? (
+            <div className="flex flex-col items-center rounded-md border border-dashed border-border bg-black/10 px-4 py-12 text-center">
+              <Inbox size={48} aria-hidden="true" className="mb-4 text-muted-foreground" />
+              <h4 className="mb-2 text-base font-bold text-foreground">Nenhum painel ativo</h4>
+              <p className="max-w-[340px] text-sm text-muted-foreground">
+                Utilize os cards acima para configurar e postar o seu primeiro painel personalizado no servidor!
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-md border border-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Painel</TableHead>
+                    <TableHead>Canal</TableHead>
+                    <TableHead>Renderização</TableHead>
+                    <TableHead>Mensagem ID</TableHead>
+                    <TableHead>Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {containers
+                    .filter((c) => c.isActive)
+                    .map((c) => {
+                      const typeMeta = panelTypes.find((t) => t.type === c.type);
+                      return (
+                        <TableRow key={c.id}>
+                          <TableCell>
+                            <span className="font-bold text-foreground">{typeMeta?.name || c.type}</span>
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-semibold">#{getChannelName(c.channelId)}</span>
+                          </TableCell>
+                          <TableCell>
+                            <StatusStamp variant="active" className="text-[11px] normal-case">
+                              {c.payload?.renderMode || 'embed'}
+                            </StatusStamp>
+                          </TableCell>
+                          <TableCell>
+                            <code className="rounded bg-primary/5 px-2 py-1 font-mono text-xs text-primary">
+                              {c.messageId || 'Aguardando repost...'}
+                            </code>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setActiveConfigType(c.type)}
+                              >
+                                <Pencil size={12} aria-hidden="true" /> Editar
+                              </Button>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                disabled={disablingId === c.id}
+                                onClick={() => handleDisable(c.id)}
+                              >
+                                <Power size={12} aria-hidden="true" /> Desativar
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </NotchedCardContent>
+      </NotchedCard>
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '32px',
-  },
-  headerBlock: {
-    borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-    paddingBottom: '16px',
-    marginBottom: '8px',
-  },
-  title: {
-    fontSize: '22px',
-    fontWeight: 800,
-    color: '#ffffff',
-    marginBottom: '8px',
-  },
-  description: {
-    fontSize: '14px',
-    color: '#949ba4',
-  },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-    gap: '24px',
-  },
-  card: {
-    padding: '24px',
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100%',
-    minHeight: '260px',
-  },
-  cardHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '16px',
-  },
-  iconWrapper: {
-    width: '40px',
-    height: '40px',
-    borderRadius: '8px',
-    background: 'rgba(88, 101, 242, 0.15)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    border: '1px solid rgba(88, 101, 242, 0.25)',
-  },
-  badge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    fontSize: '11px',
-    fontWeight: 700,
-  },
-  cardTitle: {
-    fontSize: '16px',
-    fontWeight: 700,
-    color: '#ffffff',
-    marginBottom: '8px',
-  },
-  cardDesc: {
-    fontSize: '13px',
-    color: '#949ba4',
-    lineHeight: '1.5',
-    flex: 1,
-    marginBottom: '16px',
-  },
-  configuredInfo: {
-    fontSize: '12px',
-    color: '#6e7681',
-    background: 'rgba(0, 0, 0, 0.15)',
-    padding: '6px 10px',
-    borderRadius: '4px',
-    marginBottom: '16px',
-  },
-  cardFooter: {
-    marginTop: 'auto',
-  },
-  actionBtn: {
-    width: '100%',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    padding: '8px',
-    fontSize: '13px',
-  },
-  tableCard: {
-    padding: '32px',
-  },
-  tableTitle: {
-    fontSize: '16px',
-    fontWeight: 800,
-    color: '#ffffff',
-    marginBottom: '4px',
-  },
-  tableSubtitle: {
-    fontSize: '13px',
-    color: '#949ba4',
-    marginBottom: '24px',
-  },
-  emptyContainer: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    textAlign: 'center',
-    padding: '48px 16px',
-    background: 'rgba(0, 0, 0, 0.1)',
-    border: '1px dashed var(--border)',
-    borderRadius: '8px',
-  },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    textAlign: 'left',
-  },
-  trHead: {
-    borderBottom: '1px solid var(--border)',
-    background: 'rgba(255, 255, 255, 0.01)',
-  },
-  th: {
-    padding: '12px 20px',
-    fontSize: '12px',
-    fontWeight: 600,
-    color: '#6e7681',
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-  },
-  trBody: {
-    borderBottom: '1px solid rgba(255, 255, 255, 0.02)',
-  },
-  td: {
-    padding: '12px 20px',
-    fontSize: '14px',
-    color: '#f2f3f5',
-    verticalAlign: 'middle',
-  },
-  panelName: {
-    fontWeight: 700,
-    color: '#ffffff',
-  },
-  code: {
-    fontFamily: 'monospace',
-    color: '#f0b232',
-    background: 'rgba(240, 178, 50, 0.05)',
-    padding: '4px 8px',
-    borderRadius: '4px',
-    fontSize: '12px',
-  },
-  tableActionBtn: {
-    padding: '6px 12px',
-    fontSize: '12px',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '6px',
-  },
-  backBtn: {
-    marginBottom: '20px',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '8px 16px',
-    fontSize: '13px',
-  },
-  formContainer: {
-    padding: '32px',
-  },
-};

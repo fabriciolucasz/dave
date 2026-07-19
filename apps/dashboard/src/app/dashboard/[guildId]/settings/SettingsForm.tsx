@@ -116,8 +116,8 @@ export function SettingsForm({
                 key={role.id}
                 style={{
                   ...styles.roleCard,
-                  background: isChecked ? 'rgba(88, 101, 242, 0.1)' : 'rgba(255, 255, 255, 0.02)',
-                  borderColor: isChecked ? 'var(--accent)' : 'var(--border)',
+                  background: isChecked ? 'rgba(242, 169, 59, 0.1)' : 'rgba(255, 255, 255, 0.02)',
+                  borderColor: isChecked ? 'hsl(var(--primary))' : 'hsl(var(--border))',
                 }}
               >
                 <input
@@ -172,7 +172,7 @@ const styles: Record<string, React.CSSProperties> = {
     overflowY: 'auto',
     padding: '4px',
     background: 'rgba(0, 0, 0, 0.15)',
-    border: '1px solid var(--border)',
+    border: '1px solid hsl(var(--border))',
     borderRadius: '8px',
   },
   roleCard: {
@@ -190,7 +190,7 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     width: '16px',
     height: '16px',
-    accentColor: 'var(--accent)',
+    accentColor: 'hsl(var(--primary))',
   },
   roleName: {
     fontSize: '13px',

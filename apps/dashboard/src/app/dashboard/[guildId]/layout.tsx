@@ -2,6 +2,9 @@
 import { redirect } from 'next/navigation';
 import { apiRequest } from '../../../lib/api';
 import { GuildSwitcher } from '../../../components/GuildSwitcher';
+import { NavLink } from '../../../components/NavLink';
+import { StatusStamp } from '@/components/StatusStamp';
+import { Button } from '@/components/ui/button';
 import { clearAuthSession } from '../../auth/actions';
 import Link from 'next/link';
 import {
@@ -10,8 +13,10 @@ import {
   LayoutGrid,
   CreditCard,
   User,
-  CircleAlert,
   TriangleAlert,
+  Archive,
+  Swords,
+  UserCheck,
 } from 'lucide-react';
 
 interface Guild {
@@ -20,6 +25,7 @@ interface Guild {
   name: string;
   iconHash: string | null;
   isActive: boolean;
+  botPresent: boolean;
 }
 
 export default async function GuildLayout({
@@ -47,6 +53,12 @@ export default async function GuildLayout({
     redirect('/dashboard');
   }
 
+  if (!currentGuild.botPresent) {
+    // Defesa em profundidade: navegação direta para uma guild "fantasma"
+    // (bot nunca adicionado) é redirecionada para a página de convite.
+    redirect('/dashboard');
+  }
+
   let activeSubscription = null;
   try {
     const resGuild = await apiRequest<{ guild: any }>(`/guilds/${guildId}`);
@@ -61,201 +73,82 @@ export default async function GuildLayout({
     activeSubscription.status === 'PAST_DUE';
 
   return (
-    <div style={styles.container}>
+    <div className="flex min-h-screen bg-background">
       {/* Sidebar */}
-      <aside style={styles.sidebar}>
-        <div style={styles.logoContainer}>
-          <Link href="/dashboard" style={{ textDecoration: 'none', display: 'flex', alignItems: 'baseline' }}>
-            <span style={styles.logoText}>dave</span>
-            <span style={styles.logoDot}>.</span>
+      <aside className="fixed bottom-0 left-0 top-0 z-[100] flex w-[280px] flex-col border-r border-border bg-[#101119]">
+        <div className="border-b border-border/60 px-6 py-6">
+          <Link href="/dashboard" className="flex items-baseline no-underline">
+            <span className="font-display text-2xl font-extrabold tracking-tight text-foreground">dave</span>
+            <span className="font-display text-2xl font-extrabold text-primary">.</span>
           </Link>
         </div>
 
-        <div style={styles.switcherContainer}>
+        <div className="border-b border-border/60 px-6 py-5">
           <GuildSwitcher guilds={guilds} currentGuildId={guildId} />
         </div>
 
-        <nav style={styles.nav}>
-          <Link href={`/dashboard/${guildId}/overview`} style={styles.navLink}>
+        <nav className="flex flex-1 flex-col gap-1 p-4">
+          <NavLink href={`/dashboard/${guildId}/overview`}>
             <LayoutDashboard size={16} aria-hidden="true" /> Visão Geral
-          </Link>
-          <Link href={`/dashboard/${guildId}/settings`} style={styles.navLink}>
+          </NavLink>
+          <NavLink href={`/dashboard/${guildId}/settings`}>
             <Settings size={16} aria-hidden="true" /> Configurações
-          </Link>
-          <Link href={`/dashboard/${guildId}/paineis`} style={styles.navLink}>
+          </NavLink>
+          <NavLink href={`/dashboard/${guildId}/paineis`}>
             <LayoutGrid size={16} aria-hidden="true" /> Painéis
-          </Link>
-          <Link href={`/dashboard/${guildId}/subscription`} style={styles.navLink}>
+          </NavLink>
+          <NavLink href={`/dashboard/${guildId}/bau`}>
+            <Archive size={16} aria-hidden="true" /> Baú (Estoque)
+          </NavLink>
+          <NavLink href={`/dashboard/${guildId}/central`}>
+            <Swords size={16} aria-hidden="true" /> Central (Ações)
+          </NavLink>
+          <NavLink href={`/dashboard/${guildId}/cadastros`}>
+            <UserCheck size={16} aria-hidden="true" /> Cadastros
+          </NavLink>
+          <NavLink href={`/dashboard/${guildId}/subscription`}>
             <CreditCard size={16} aria-hidden="true" /> Assinatura
-          </Link>
+          </NavLink>
         </nav>
 
-        <div style={styles.sidebarFooter}>
-          <Link href="/account" style={styles.accountLink}>
+        <div className="flex flex-col gap-3 border-t border-border/60 p-4">
+          <Link
+            href="/account"
+            className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-foreground no-underline"
+          >
             <User size={16} aria-hidden="true" /> Minha Conta
           </Link>
-          <form action={clearAuthSession} style={{ width: '100%' }}>
-            <button type="submit" className="btn btn-secondary" style={styles.logoutBtn}>
+          <form action={clearAuthSession} className="w-full">
+            <Button type="submit" variant="outline" size="sm" className="w-full">
               Sair
-            </button>
+            </Button>
           </form>
         </div>
       </aside>
 
       {/* Main Content Area */}
-      <main style={styles.main}>
-        <div style={styles.topbar}>
-          <div style={styles.topbarLeft}>
-            <h2 style={styles.topbarTitle}>{currentGuild.name}</h2>
-            <span className={`badge ${currentGuild.isActive ? 'badge-active' : 'badge-inactive'}`}>
+      <main className="ml-[280px] flex min-h-screen flex-1 flex-col">
+        <div className="sticky top-0 z-[90] flex h-[72px] items-center justify-between border-b border-border bg-background/60 px-10 backdrop-blur">
+          <div className="flex items-center gap-4">
+            <h2 className="font-display text-xl font-extrabold text-foreground">{currentGuild.name}</h2>
+            <StatusStamp variant={currentGuild.isActive ? 'active' : 'pending'}>
               {currentGuild.isActive ? 'Ativo' : 'Pendente'}
-            </span>
+            </StatusStamp>
           </div>
         </div>
 
         {isExpired && (
-          <div style={styles.expiredBanner} className="animate-fade-in">
-            <TriangleAlert size={16} aria-hidden="true" /> Este servidor não possui uma assinatura Pro ativa. Alguns recursos premium podem estar bloqueados ou limitados.
-            <Link href={`/dashboard/${guildId}/subscription`} style={styles.bannerLink}>
+          <div className="flex items-center gap-2 border-b border-destructive/25 bg-destructive/10 px-10 py-3 text-sm font-semibold text-destructive animate-fade-in">
+            <TriangleAlert size={16} aria-hidden="true" /> Este servidor não possui uma assinatura Pro ativa. Alguns
+            recursos premium podem estar bloqueados ou limitados.
+            <Link href={`/dashboard/${guildId}/subscription`} className="ml-1.5 font-bold text-foreground underline">
               Assinar Pro
             </Link>
           </div>
         )}
 
-        <div style={styles.content}>{children}</div>
+        <div className="flex-1 p-10">{children}</div>
       </main>
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    display: 'flex',
-    minHeight: '100vh',
-    background: '#0a0b10',
-  },
-  sidebar: {
-    width: '280px',
-    background: '#11131c',
-    borderRight: '1px solid rgba(255, 255, 255, 0.05)',
-    display: 'flex',
-    flexDirection: 'column',
-    position: 'fixed',
-    top: 0,
-    bottom: 0,
-    left: 0,
-    zIndex: 100,
-  },
-  logoContainer: {
-    padding: '24px',
-    borderBottom: '1px solid rgba(255, 255, 255, 0.03)',
-  },
-  logoText: {
-    fontSize: '24px',
-    fontWeight: 900,
-    letterSpacing: '-1px',
-    background: 'linear-gradient(135deg, #ffffff 0%, #a5a6c4 100%)',
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-  },
-  logoDot: {
-    fontSize: '24px',
-    color: '#5865f2',
-  },
-  switcherContainer: {
-    padding: '20px 24px',
-    borderBottom: '1px solid rgba(255, 255, 255, 0.03)',
-  },
-  nav: {
-    padding: '24px 16px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-    flex: 1,
-  },
-  navLink: {
-    color: '#949ba4',
-    textDecoration: 'none',
-    padding: '12px 16px',
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: 600,
-    transition: 'all 0.2s ease',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  },
-  sidebarFooter: {
-    padding: '24px 16px',
-    borderTop: '1px solid rgba(255, 255, 255, 0.03)',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-  },
-  accountLink: {
-    color: '#f2f3f5',
-    textDecoration: 'none',
-    fontSize: '14px',
-    fontWeight: 600,
-    padding: '8px 16px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  logoutBtn: {
-    width: '100%',
-    padding: '8px',
-    fontSize: '13px',
-  },
-  main: {
-    flex: 1,
-    marginLeft: '280px',
-    display: 'flex',
-    flexDirection: 'column',
-    minHeight: '100vh',
-  },
-  topbar: {
-    height: '72px',
-    borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '0 40px',
-    background: 'rgba(10, 11, 16, 0.5)',
-    backdropFilter: 'blur(8px)',
-    position: 'sticky',
-    top: 0,
-    zIndex: 90,
-  },
-  topbarLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-  },
-  topbarTitle: {
-    fontSize: '20px',
-    fontWeight: 800,
-    color: '#ffffff',
-  },
-  content: {
-    padding: '40px',
-    flex: 1,
-  },
-  expiredBanner: {
-    background: 'rgba(218, 55, 60, 0.12)',
-    borderBottom: '1px solid rgba(218, 55, 60, 0.25)',
-    color: '#f25c60',
-    padding: '12px 40px',
-    fontSize: '14px',
-    fontWeight: 600,
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  bannerLink: {
-    color: '#ffffff',
-    textDecoration: 'underline',
-    marginLeft: '6px',
-    fontWeight: 700,
-  },
-};

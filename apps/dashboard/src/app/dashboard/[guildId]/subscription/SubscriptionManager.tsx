@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { createCheckoutSession, cancelActiveSubscription } from './actions';
-import { Sparkles, CircleCheck, CircleAlert, Check, CreditCard, Power } from 'lucide-react';
+import { Sparkles, CircleCheck, CircleAlert, Check, CreditCard, Power, X } from 'lucide-react';
 
 interface Plan {
   id: string;
@@ -44,8 +44,6 @@ export function SubscriptionManager({
   const [canceling, setCanceling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Regra de autorização para cancelamento:
-  // Somente o criador da assinatura ou o dono do servidor (isOwner) pode cancelar
   const isAllowedToCancel =
     activeSubscription && (activeSubscription.createdByUserId === userId || isOwner);
 
@@ -158,43 +156,74 @@ export function SubscriptionManager({
           </p>
 
           <div style={styles.plansGrid}>
-            {plans.map((plan) => (
-              <div key={plan.id} style={styles.planCard} className="card-glass">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {plan.code !== 'free' && <Sparkles size={16} style={{ color: '#ffc44f' }} />}
-                  <h4 style={styles.planTitle}>{plan.name}</h4>
-                </div>
-                <div style={styles.priceRow}>
-                  <span style={styles.priceVal}>R$ {(plan.priceCents / 100).toFixed(2)}</span>
-                  <span style={styles.priceUnit}>/ mês</span>
-                </div>
-                <div style={styles.featuresList}>
-                  {plan.features &&
-                    Object.entries(plan.features).map(([key, val]) => (
-                      <div key={key} style={styles.featureItem}>
-                        <Check size={14} style={{ color: '#2ec46d', marginRight: '6px', display: 'inline' }} />
-                        {renderFeatureText(key, val)}
-                      </div>
-                    ))}
-                </div>
-                <button
-                  onClick={() => handleSubscribe(plan.id)}
-                  disabled={loadingPlanId !== null || plan.code === 'free'}
-                  className="btn btn-primary"
-                  style={styles.subscribeBtn}
+            {plans.map((plan) => {
+              const isPro = plan.code !== 'free';
+              return (
+                <div
+                  key={plan.id}
+                  style={{
+                    ...styles.planCard,
+                    ...(isPro ? styles.proPlanCard : {}),
+                  }}
+                  className="card-glass"
                 >
-                  {plan.code === 'free' ? (
-                    'Plano Inicial'
-                  ) : loadingPlanId === plan.id ? (
-                    'Carregando...'
-                  ) : (
-                    <>
-                      <CreditCard size={14} aria-hidden="true" style={{ marginRight: '6px' }} /> Assinar Agora
-                    </>
+                  {isPro && (
+                    <div style={styles.recommendedBadge}>
+                      <Sparkles size={10} /> RECOMENDADO
+                    </div>
                   )}
-                </button>
-              </div>
-            ))}
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {isPro && <Sparkles size={16} style={{ color: '#ffc44f' }} />}
+                    <h4 style={styles.planTitle}>{plan.name}</h4>
+                  </div>
+                  <div style={styles.priceRow}>
+                    <span style={styles.priceVal}>R$ {(plan.priceCents / 100).toFixed(2)}</span>
+                    <span style={styles.priceUnit}>/ mês</span>
+                  </div>
+                  
+                  {/* Features list */}
+                  <div style={styles.featuresList}>
+                    {plan.features &&
+                      Object.entries(plan.features).map(([key, val]) => {
+                        const hasFeature = typeof val === 'boolean' ? val : val !== 0;
+                        return (
+                          <div key={key} style={styles.featureItem}>
+                            {hasFeature ? (
+                              <Check size={14} style={{ color: '#2ec46d', marginRight: '6px', display: 'inline' }} />
+                            ) : (
+                              <X size={14} style={{ color: '#da373c', marginRight: '6px', display: 'inline' }} />
+                            )}
+                            <span style={{ color: hasFeature ? '#dbdee1' : '#6e7681' }}>
+                              {renderFeatureText(key, val)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                  </div>
+
+                  <button
+                    onClick={() => handleSubscribe(plan.id)}
+                    disabled={loadingPlanId !== null || plan.code === 'free'}
+                    className="btn btn-primary"
+                    style={{
+                      ...styles.subscribeBtn,
+                      ...(isPro ? styles.proSubscribeBtn : {}),
+                    }}
+                  >
+                    {plan.code === 'free' ? (
+                      'Plano Inicial Ativo'
+                    ) : loadingPlanId === plan.id ? (
+                      'Carregando...'
+                    ) : (
+                      <>
+                        <CreditCard size={14} aria-hidden="true" style={{ marginRight: '6px' }} /> Assinar Agora
+                      </>
+                    )}
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -234,7 +263,7 @@ const styles: Record<string, React.CSSProperties> = {
   badgeLabel: {
     fontSize: '12px',
     fontWeight: 700,
-    color: 'var(--accent)',
+    color: '#5865f2',
     textTransform: 'uppercase',
   },
   planName: {
@@ -302,8 +331,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   plansGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-    gap: '24px',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+    gap: '32px',
+    maxWidth: '800px',
   },
   planCard: {
     display: 'flex',
@@ -311,10 +341,29 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     textAlign: 'center',
     gap: '16px',
-    padding: '32px 24px',
+    padding: '40px 32px',
+    position: 'relative',
+  },
+  proPlanCard: {
+    borderColor: '#ffc44f',
+    background: 'linear-gradient(135deg, rgba(255, 196, 79, 0.05) 0%, rgba(21, 23, 35, 0.8) 100%)',
+    boxShadow: '0 8px 32px rgba(255, 196, 79, 0.08)',
+  },
+  recommendedBadge: {
+    position: 'absolute',
+    top: '-12px',
+    background: '#ffc44f',
+    color: '#000000',
+    padding: '4px 12px',
+    borderRadius: '12px',
+    fontSize: '10px',
+    fontWeight: 800,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
   },
   planTitle: {
-    fontSize: '20px',
+    fontSize: '22px',
     fontWeight: 800,
     color: '#ffffff',
   },
@@ -324,7 +373,7 @@ const styles: Record<string, React.CSSProperties> = {
     gap: '4px',
   },
   priceVal: {
-    fontSize: '32px',
+    fontSize: '36px',
     fontWeight: 800,
     color: '#ffffff',
   },
@@ -335,21 +384,30 @@ const styles: Record<string, React.CSSProperties> = {
   featuresList: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '8px',
-    alignItems: 'center',
+    gap: '12px',
+    alignItems: 'flex-start',
     fontSize: '13px',
-    color: '#949ba4',
-    padding: '16px 0',
+    color: '#dbdee1',
+    padding: '24px 0',
     width: '100%',
-    borderTop: '1px solid rgba(255, 255, 255, 0.03)',
-    borderBottom: '1px solid rgba(255, 255, 255, 0.03)',
+    borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+    borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
     flex: 1,
   },
   featureItem: {
-    textAlign: 'center',
+    display: 'flex',
+    alignItems: 'center',
+    textAlign: 'left',
   },
   subscribeBtn: {
     width: '100%',
     padding: '12px 24px',
+    fontSize: '14px',
+    fontWeight: 700,
+  },
+  proSubscribeBtn: {
+    background: '#ffc44f',
+    color: '#000000',
+    borderColor: '#ffc44f',
   },
 };

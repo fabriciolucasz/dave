@@ -1,16 +1,27 @@
 // apps/dashboard/src/app/dashboard/page.tsx
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
+import { Plus } from 'lucide-react';
 import { apiRequest, ApiError } from '../../lib/api';
-import { env } from '@dave/config';
 import { clearAuthSession } from '../auth/actions';
+import { getBotInviteUrl } from '../../lib/discord';
+import {
+  NotchedCard,
+  NotchedCardContent,
+  NotchedCardHeader,
+  NotchedCardTitle,
+} from '@/components/NotchedCard';
+import { StatusStamp } from '@/components/StatusStamp';
+import { Button } from '@/components/ui/button';
 
 // ---------------------------------------------------------------------------
 // Dashboard Page (/dashboard)
 //
 // Roteador de entrada pós-login:
-//   - 0 servidores → Tela de convite para adicionar o bot.
-//   - 1 servidor → Redireciona direto para overview do servidor.
-//   - Múltiplos → Grade de seleção de servidores.
+//   - 0 servidores administrados → Tela de convite para adicionar o bot.
+//   - 1 servidor com bot presente → Redireciona direto para overview.
+//   - Demais casos (múltiplos servidores, ou o único servidor não tem o bot
+//     adicionado ainda) → Grade dividida em "Ativos" e "Bot não adicionado".
 // ---------------------------------------------------------------------------
 
 interface Guild {
@@ -19,6 +30,7 @@ interface Guild {
   name: string;
   iconHash: string | null;
   isActive: boolean;
+  botPresent: boolean;
 }
 
 export default async function DashboardPage() {
@@ -37,175 +49,121 @@ export default async function DashboardPage() {
     redirect('/');
   }
 
-  // Cenário 1: 0 servidores onde o bot está presente
-  if (guilds.length === 0) {
-    const inviteUrl = `https://discord.com/oauth2/authorize?client_id=${env.DISCORD_CLIENT_ID}&permissions=8&scope=bot%20applications.commands`;
+  const inviteUrl = getBotInviteUrl();
 
+  // Cenário 1: nenhum servidor onde o usuário é admin tem o bot presente
+  if (guilds.length === 0) {
     return (
-      <div style={styles.container} className="animate-fade-in">
-        <div style={styles.card} className="card-glass">
-          <h2 style={styles.title}>Nenhum servidor encontrado</h2>
-          <p style={styles.text}>
-            Você é administrador de servidores, mas o bot do **Dave** ainda não foi adicionado a nenhum deles.
-          </p>
-          <a href={inviteUrl} className="btn btn-primary" target="_blank" rel="noopener noreferrer" style={styles.btn}>
-            Adicionar Bot ao Servidor
-          </a>
-        </div>
+      <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,hsl(var(--card))_0%,hsl(var(--background))_100%)] p-6">
+        <NotchedCard className="w-full max-w-md text-center">
+          <NotchedCardHeader>
+            <NotchedCardTitle className="font-display text-2xl font-extrabold tracking-tight">
+              Nenhum servidor encontrado
+            </NotchedCardTitle>
+          </NotchedCardHeader>
+          <NotchedCardContent className="flex flex-col items-center gap-5">
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Você é administrador de servidores, mas o bot do <strong>Dave</strong> ainda não foi adicionado a
+              nenhum deles.
+            </p>
+            <Button asChild size="lg">
+              <a href={inviteUrl} target="_blank" rel="noopener noreferrer">
+                <Plus size={16} aria-hidden="true" />
+                Adicionar Bot ao Servidor
+              </a>
+            </Button>
+          </NotchedCardContent>
+        </NotchedCard>
       </div>
     );
   }
 
-  // Cenário 2: 1 único servidor cadastrado
-  if (guilds.length === 1) {
-    redirect(`/dashboard/${guilds[0].discordId}/overview`);
+  const withBot = guilds.filter((g) => g.botPresent);
+  const withoutBot = guilds.filter((g) => !g.botPresent);
+
+  // Cenário 2: único servidor administrado e o bot já está presente nele
+  if (guilds.length === 1 && withBot.length === 1) {
+    redirect(`/dashboard/${withBot[0]!.discordId}/overview`);
   }
 
-  // Cenário 3: Múltiplos servidores
+  // Cenário 3: múltiplos servidores, e/ou o(s) único(s) servidor(es) ainda
+  // sem o bot adicionado — renderizados em seções separadas.
   return (
-    <div style={styles.multiContainer} className="animate-fade-in">
-      <header style={styles.header}>
-        <div style={styles.logoContainer}>
-          <span style={styles.logoText}>dave</span>
-          <span style={styles.logoDot}>.</span>
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-12 px-6 py-16">
+      <header className="flex flex-col gap-4">
+        <div className="flex select-none items-baseline">
+          <span className="font-display text-3xl font-extrabold tracking-tight text-foreground">dave</span>
+          <span className="font-display text-3xl font-extrabold text-primary">.</span>
         </div>
-        <h1 style={styles.headerTitle}>Selecione um Servidor</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Selecione um Servidor</h1>
       </header>
 
-      <div style={styles.grid}>
-        {guilds.map((guild) => {
-          const iconUrl = guild.iconHash
-            ? `https://cdn.discordapp.com/icons/${guild.discordId}/${guild.iconHash}.png`
-            : null;
+      {withBot.length > 0 && (
+        <section className="flex flex-col gap-4">
+          <h2 className="font-display text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground">
+            Ativos ({withBot.length})
+          </h2>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-6">
+            {withBot.map((guild) => (
+              <Link key={guild.id} href={`/dashboard/${guild.discordId}/overview`} className="group block">
+                <NotchedCard className="flex flex-col items-center gap-4 p-8 text-center transition-colors group-hover:border-primary/50">
+                  <GuildIcon guild={guild} />
+                  <h3 className="font-display text-lg font-bold text-foreground">{guild.name}</h3>
+                  <StatusStamp variant={guild.isActive ? 'active' : 'pending'}>
+                    {guild.isActive ? 'Ativo' : 'Pendente'}
+                  </StatusStamp>
+                </NotchedCard>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
-          return (
-            <a key={guild.id} href={`/dashboard/${guild.discordId}/overview`} style={styles.guildCard} className="card-glass">
-              {iconUrl ? (
-                <img src={iconUrl} alt={guild.name} style={styles.guildIcon} />
-              ) : (
-                <div style={styles.guildIconFallback}>{guild.name.charAt(0)}</div>
-              )}
-              <h3 style={styles.guildName}>{guild.name}</h3>
-              <span className={`badge ${guild.isActive ? 'badge-active' : 'badge-inactive'}`}>
-                {guild.isActive ? 'Ativo' : 'Pendente'}
-              </span>
-            </a>
-          );
-        })}
-      </div>
+      {withoutBot.length > 0 && (
+        <section className="flex flex-col gap-4">
+          <h2 className="font-display text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground">
+            Bot não adicionado ({withoutBot.length})
+          </h2>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-6">
+            {withoutBot.map((guild) => (
+              <NotchedCard key={guild.id} className="flex flex-col items-center gap-4 p-8 text-center opacity-80">
+                <GuildIcon guild={guild} />
+                <h3 className="font-display text-lg font-bold text-foreground">{guild.name}</h3>
+                <StatusStamp variant="inactive">Bot Ausente</StatusStamp>
+                <Button asChild size="sm" variant="outline">
+                  <a href={inviteUrl} target="_blank" rel="noopener noreferrer">
+                    <Plus size={14} aria-hidden="true" />
+                    Adicionar Bot
+                  </a>
+                </Button>
+              </NotchedCard>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    minHeight: '100vh',
-    background: 'radial-gradient(circle at top, #161824 0%, #0a0b10 100%)',
-    padding: '24px',
-  },
-  card: {
-    maxWidth: '460px',
-    width: '100%',
-    textAlign: 'center',
-    padding: '40px 32px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '20px',
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: '24px',
-    fontWeight: 800,
-    color: '#ffffff',
-  },
-  text: {
-    fontSize: '15px',
-    color: '#949ba4',
-    lineHeight: 1.6,
-  },
-  btn: {
-    padding: '12px 24px',
-    fontSize: '15px',
-    marginTop: '8px',
-  },
-  multiContainer: {
-    maxWidth: '1200px',
-    width: '100%',
-    margin: '0 auto',
-    padding: '64px 24px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '48px',
-  },
-  header: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '16px',
-  },
-  logoContainer: {
-    display: 'flex',
-    alignItems: 'baseline',
-    userSelect: 'none',
-  },
-  logoText: {
-    fontSize: '32px',
-    fontWeight: 900,
-    letterSpacing: '-1.5px',
-    background: 'linear-gradient(135deg, #ffffff 0%, #a5a6c4 100%)',
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-  },
-  logoDot: {
-    fontSize: '32px',
-    fontWeight: 900,
-    color: '#5865f2',
-  },
-  headerTitle: {
-    fontSize: '28px',
-    fontWeight: 800,
-    color: '#ffffff',
-  },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-    gap: '24px',
-  },
-  guildCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '16px',
-    textAlign: 'center',
-    padding: '32px 24px',
-    textDecoration: 'none',
-    color: 'inherit',
-  },
-  guildIcon: {
-    width: '80px',
-    height: '80px',
-    borderRadius: '50%',
-    objectFit: 'cover',
-    border: '2px solid rgba(255, 255, 255, 0.1)',
-  },
-  guildIconFallback: {
-    width: '80px',
-    height: '80px',
-    borderRadius: '50%',
-    background: 'linear-gradient(135deg, #2c2f48 0%, #151725 100%)',
-    color: '#ffffff',
-    fontSize: '32px',
-    fontWeight: 800,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    border: '2px solid rgba(255, 255, 255, 0.1)',
-  },
-  guildName: {
-    fontSize: '18px',
-    fontWeight: 700,
-    color: '#ffffff',
-  },
-};
+function GuildIcon({ guild }: { guild: Guild }) {
+  const iconUrl = guild.iconHash
+    ? `https://cdn.discordapp.com/icons/${guild.discordId}/${guild.iconHash}.png`
+    : null;
+
+  if (iconUrl) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return (
+      <img
+        src={iconUrl}
+        alt={guild.name}
+        className="h-20 w-20 rounded-full border-2 border-border object-cover"
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-20 w-20 items-center justify-center rounded-full border-2 border-border bg-secondary font-display text-2xl font-extrabold text-foreground">
+      {guild.name.charAt(0)}
+    </div>
+  );
+}

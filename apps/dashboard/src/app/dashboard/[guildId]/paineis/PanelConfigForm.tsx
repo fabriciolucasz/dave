@@ -2,9 +2,18 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Sparkles, Save, Eye, Trash2, ArrowUp, ArrowDown, Plus } from 'lucide-react';
+import { Sparkles, Save, Eye, Trash2, ArrowUp, ArrowDown, Info } from 'lucide-react';
+import { getAvailablePlaceholders, resolvePlaceholders, DEFAULT_CONTAINER_PAYLOADS, type ContainerType as ContainerTypeId } from '@dave/discord-kit/browser';
 import { saveContainer } from './actions';
 import Link from 'next/link';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface ContainerType {
   type: string;
@@ -37,28 +46,29 @@ type ContainerBlock =
   | { blockType: 'section'; text: string; accessory?: { type: 'thumbnail' | 'button'; url?: string; label?: string } }
   | { blockType: 'file'; url: string };
 
-const getAvailablePlaceholders = (type: string): string[] => {
-  switch (type) {
-    case 'welcome':
-      return ['welcomeUser', 'serverName', 'memberCount'];
-    case 'ticket_panel':
-    case 'rules_panel':
-    case 'verification_panel':
-      return ['serverName'];
-    case 'announcement':
-      return ['serverName', 'authorName'];
-    default:
-      return [];
-  }
-};
+// Tipos que expõem um campo de "texto do botão interativo" no payload
+// (todos exceto ranking_panel, que não tem botão — seu conteúdo é
+// gerado dinamicamente pelo job de repost).
+const BUTTON_LABEL_TYPES = [
+  'ticket_panel',
+  'verification_panel',
+  'inventory_panel',
+  'illegal_action_panel',
+  'weekly_goal_panel',
+  'registration_panel',
+];
 
-const resolvePlaceholders = (text: string, context: Record<string, string>): string => {
-  if (!text) return text;
-  let resolved = text;
-  for (const [key, value] of Object.entries(context)) {
-    resolved = resolved.split(`\${${key}}`).join(value);
-  }
-  return resolved;
+// Cores reais dos estilos de botão do Discord (ButtonStyle.Primary/Success/
+// Secondary/Danger) usadas apenas para mimetizar fielmente a UI real do
+// Discord dentro do mock de preview — não fazem parte da paleta de design
+// do próprio dashboard, por isso não usam os tokens do sistema.
+const DISCORD_BUTTON_COLOR: Record<string, string> = {
+  ticket_panel: '#5865f2',
+  verification_panel: '#248046',
+  inventory_panel: '#4f545c',
+  illegal_action_panel: '#da373c',
+  weekly_goal_panel: '#248046',
+  registration_panel: '#5865f2',
 };
 
 export function PanelConfigForm({
@@ -75,7 +85,8 @@ export function PanelConfigForm({
   const isPro = planFeatures.customWebhookEnabled;
   const isSticky = panelType.isSticky;
 
-  const initialPayload = existingContainer?.payload || {};
+  const initialPayload =
+    existingContainer?.payload || DEFAULT_CONTAINER_PAYLOADS[panelType.type as ContainerTypeId] || {};
 
   // Form States
   const [renderMode, setRenderMode] = useState<'embed' | 'container'>(initialPayload.renderMode || 'embed');
@@ -94,6 +105,8 @@ export function PanelConfigForm({
     initialPayload.showMemberCount !== undefined ? initialPayload.showMemberCount : true
   );
   const [mentionRoleId, setMentionRoleId] = useState(initialPayload.mentionRoleId || '');
+  const [footerSignature, setFooterSignature] = useState(initialPayload.footerSignature || '');
+  const [topN, setTopN] = useState<number>(initialPayload.topN || 10);
 
   // ---------------------------------------------------------------------------
   // Modo Embed States (Seção 20.1)
@@ -132,7 +145,7 @@ export function PanelConfigForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const placeholders = getAvailablePlaceholders(panelType.type);
+  const placeholders = getAvailablePlaceholders(panelType.type as ContainerTypeId);
 
   // Remetente do Preview
   const botName = webhookName || botIdentity?.username || 'Dave';
@@ -175,7 +188,7 @@ export function PanelConfigForm({
     const before = text.substring(0, start);
     const after = text.substring(end, text.length);
     const newValue = before + `\${${placeholder}}` + after;
-    
+
     const newBlocks = [...blocks];
     newBlocks[index] = { ...newBlocks[index], content: newValue } as any;
     setBlocks(newBlocks);
@@ -331,12 +344,18 @@ export function PanelConfigForm({
     }
 
     // Campos adicionais específicos por tipo
-    if (panelType.type === 'ticket_panel' || panelType.type === 'verification_panel') {
+    if (BUTTON_LABEL_TYPES.includes(panelType.type)) {
       payload.buttonLabel = buttonLabel || undefined;
-    } else if (panelType.type === 'welcome') {
+    }
+    if (panelType.type === 'registration_panel') {
+      payload.footerSignature = footerSignature || undefined;
+    }
+    if (panelType.type === 'welcome') {
       payload.showMemberCount = showMemberCount;
     } else if (panelType.type === 'announcement') {
       payload.mentionRoleId = mentionRoleId || undefined;
+    } else if (panelType.type === 'ranking_panel') {
+      payload.topN = topN || 10;
     }
 
     const res = await saveContainer(guildId, channelId, panelType.type, payload, repostDelay);
@@ -358,7 +377,7 @@ export function PanelConfigForm({
   };
 
   return (
-    <div style={styles.splitLayout}>
+    <div className="flex flex-col gap-10 md:flex-row">
       <style>{`
         .discord-spoiler {
           background: #1e1f22;
@@ -423,55 +442,57 @@ export function PanelConfigForm({
       `}</style>
 
       {/* Coluna 1: Formulário */}
-      <div style={styles.formCol}>
-        <h3 style={styles.formTitle}>Configurar Painel: {panelType.name}</h3>
-        <p style={styles.formSubtitle}>{panelType.description}</p>
+      <div className="min-w-[340px] flex-1">
+        <h3 className="mb-2 font-display text-lg font-extrabold text-foreground">
+          Configurar Painel: {panelType.name}
+        </h3>
+        <p className="mb-6 text-sm text-muted-foreground">{panelType.description}</p>
 
-        {error && <div style={styles.errorAlert}>{error}</div>}
+        {error && (
+          <div className="mb-5 rounded-md border border-destructive/30 bg-destructive/15 px-4 py-3 text-sm text-destructive">
+            {error}
+          </div>
+        )}
 
-        <form onSubmit={handleSubmit} style={styles.form}>
-          <div style={styles.sectionHeader}>Visual & Estética</div>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+          <SectionHeading>Visual &amp; Estética</SectionHeading>
 
           {/* Toggle de Modo */}
-          <div className="form-group">
-            <label className="form-label">Modo de Renderização</label>
-            <div style={styles.toggleGroup}>
-              <button
+          <div className="space-y-2">
+            <Label>Modo de Renderização</Label>
+            <div className="flex gap-1 rounded-md border border-border bg-black/20 p-1">
+              <Button
                 type="button"
+                variant={renderMode === 'embed' ? 'default' : 'ghost'}
+                className="flex-1"
                 onClick={() => setRenderMode('embed')}
-                style={{
-                  ...styles.toggleBtn,
-                  ...(renderMode === 'embed' ? styles.toggleBtnActive : {}),
-                }}
               >
                 Embed Tradicional
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant={renderMode === 'container' ? 'default' : 'ghost'}
+                className="flex-1"
                 onClick={() => setRenderMode('container')}
-                style={{
-                  ...styles.toggleBtn,
-                  ...(renderMode === 'container' ? styles.toggleBtnActive : {}),
-                }}
               >
                 Layout de Container
-              </button>
+              </Button>
             </div>
-            <p style={styles.helpText}>
+            <p className="text-xs text-muted-foreground">
               {renderMode === 'embed'
                 ? 'Estilo clássico do Discord estruturado via campos de EmbedBuilder.'
                 : 'Interface modular flexível estruturada por blocos interativos reordenáveis.'}
             </p>
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Título Geral do Painel</label>
-            <input
+          <div className="space-y-2">
+            <Label htmlFor="field-title">Título Geral do Painel</Label>
+            <Input
+              id="field-title"
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Digite o título principal"
-              className="form-control"
             />
           </div>
 
@@ -479,193 +500,156 @@ export function PanelConfigForm({
               FORMULÁRIO DO MODO EMBED (Seção 20.1)
              ------------------------------------------------------------------- */}
           {renderMode === 'embed' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div className="form-group">
-                <label className="form-label">Descrição (Descrição do Embed)</label>
-                <textarea
+            <div className="flex flex-col gap-5">
+              <div className="space-y-2">
+                <Label htmlFor="field-embed-description">Descrição (Descrição do Embed)</Label>
+                <Textarea
                   id="field-embed-description"
                   value={embedDescription}
                   onChange={(e) => setEmbedDescription(e.target.value)}
                   placeholder="Conteúdo descritivo. Aceita variáveis e markdown."
-                  className="form-control"
                   rows={4}
                   required
                 />
                 {placeholders.length > 0 && (
-                  <div style={styles.placeholdersContainer}>
-                    {placeholders.map((ph) => (
-                      <button
-                        type="button"
-                        key={ph}
-                        onClick={() => insertPlaceholderInDescription(ph)}
-                        style={styles.placeholderBtn}
-                      >
-                        + {`\${${ph}}`}
-                      </button>
-                    ))}
-                  </div>
+                  <PlaceholderChips placeholders={placeholders} onInsert={insertPlaceholderInDescription} />
                 )}
               </div>
 
-              <div style={styles.row}>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Link do Título (URL)</label>
-                  <input
-                    type="url"
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                    placeholder="https://exemplo.com"
-                    className="form-control"
-                  />
+              <div className="flex flex-wrap gap-4">
+                <div className="min-w-[200px] flex-1 space-y-2">
+                  <Label htmlFor="field-url">Link do Título (URL)</Label>
+                  <Input id="field-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://exemplo.com" />
                 </div>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Miniatura (Thumbnail URL)</label>
-                  <input
+                <div className="min-w-[200px] flex-1 space-y-2">
+                  <Label htmlFor="field-thumb">Miniatura (Thumbnail URL)</Label>
+                  <Input
+                    id="field-thumb"
                     type="url"
                     value={thumbnailUrl}
                     onChange={(e) => setThumbnailUrl(e.target.value)}
                     placeholder="https://exemplo.com/thumb.png"
-                    className="form-control"
                   />
                 </div>
               </div>
 
-              <div style={styles.row}>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Nome do Autor</label>
-                  <input
-                    type="text"
-                    value={authorName}
-                    onChange={(e) => setAuthorName(e.target.value)}
-                    placeholder="Nome do Autor"
-                    className="form-control"
-                  />
+              <div className="flex flex-wrap gap-4">
+                <div className="min-w-[200px] flex-1 space-y-2">
+                  <Label htmlFor="field-author">Nome do Autor</Label>
+                  <Input id="field-author" type="text" value={authorName} onChange={(e) => setAuthorName(e.target.value)} placeholder="Nome do Autor" />
                 </div>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Ícone do Autor (URL)</label>
-                  <input
+                <div className="min-w-[200px] flex-1 space-y-2">
+                  <Label htmlFor="field-author-icon">Ícone do Autor (URL)</Label>
+                  <Input
+                    id="field-author-icon"
                     type="url"
                     value={authorIconUrl}
                     onChange={(e) => setAuthorIconUrl(e.target.value)}
                     placeholder="https://exemplo.com/icon.png"
-                    className="form-control"
                   />
                 </div>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Imagem Principal (Image URL)</label>
-                <input
+              <div className="space-y-2">
+                <Label htmlFor="field-image">Imagem Principal (Image URL)</Label>
+                <Input
+                  id="field-image"
                   type="url"
                   value={imageUrl}
                   onChange={(e) => setImageUrl(e.target.value)}
                   placeholder="https://exemplo.com/banner.png"
-                  className="form-control"
                 />
               </div>
 
-              <div style={styles.row}>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Texto do Rodapé</label>
-                  <input
-                    type="text"
-                    value={footerText}
-                    onChange={(e) => setFooterText(e.target.value)}
-                    placeholder="Texto do rodapé"
-                    className="form-control"
-                  />
+              <div className="flex flex-wrap gap-4">
+                <div className="min-w-[200px] flex-1 space-y-2">
+                  <Label htmlFor="field-footer-text">Texto do Rodapé</Label>
+                  <Input id="field-footer-text" type="text" value={footerText} onChange={(e) => setFooterText(e.target.value)} placeholder="Texto do rodapé" />
                 </div>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label className="form-label">Ícone do Rodapé (URL)</label>
-                  <input
+                <div className="min-w-[200px] flex-1 space-y-2">
+                  <Label htmlFor="field-footer-icon">Ícone do Rodapé (URL)</Label>
+                  <Input
+                    id="field-footer-icon"
                     type="url"
                     value={footerIconUrl}
                     onChange={(e) => setFooterIconUrl(e.target.value)}
                     placeholder="https://exemplo.com/footer-icon.png"
-                    className="form-control"
                   />
                 </div>
               </div>
 
-              <div className="form-group" style={styles.checkboxGroup}>
-                <input
-                  type="checkbox"
-                  id="field-showTimestamp"
-                  checked={showTimestamp}
-                  onChange={(e) => setShowTimestamp(e.target.checked)}
-                  style={styles.checkbox}
-                />
-                <label htmlFor="field-showTimestamp" style={styles.checkboxLabel}>
+              <div className="flex items-center gap-3">
+                <Switch id="field-showTimestamp" checked={showTimestamp} onCheckedChange={setShowTimestamp} />
+                <Label htmlFor="field-showTimestamp" className="cursor-pointer font-normal">
                   Exibir Horário Atual no Rodapé (Timestamp)
-                </label>
+                </Label>
               </div>
 
               {/* Seção de Campos (Fields) */}
-              <div style={{ border: '1px solid var(--border)', borderRadius: '8px', padding: '16px', background: 'rgba(0,0,0,0.1)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#ffffff' }}>Campos Customizados (Fields)</span>
-                  <button
+              <div className="rounded-md border border-border bg-black/10 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <span className="text-sm font-bold text-foreground">Campos Customizados (Fields)</span>
+                  <Button
                     type="button"
+                    variant="outline"
+                    size="sm"
                     onClick={() => setFields([...fields, { name: '', value: '', inline: false }])}
-                    className="btn btn-secondary"
-                    style={{ padding: '4px 8px', fontSize: '11px' }}
                   >
                     + Adicionar Campo
-                  </button>
+                  </Button>
                 </div>
 
                 {fields.length === 0 ? (
-                  <p style={{ fontSize: '11px', color: '#949ba4', textAlign: 'center', padding: '12px 0' }}>Nenhum campo adicionado.</p>
+                  <p className="py-3 text-center text-xs text-muted-foreground">Nenhum campo adicionado.</p>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div className="flex flex-col gap-3">
                     {fields.map((f, fIdx) => (
-                      <div key={fIdx} style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '8px' }}>
-                        <input
+                      <div key={fIdx} className="flex flex-wrap items-center gap-2 border-b border-white/[0.03] pb-2">
+                        <Input
                           type="text"
                           placeholder="Nome"
                           value={f.name}
                           onChange={(e) => {
                             const updated = [...fields];
-                            updated[fIdx].name = e.target.value;
+                            updated[fIdx] = { ...updated[fIdx], name: e.target.value };
                             setFields(updated);
                           }}
-                          className="form-control"
-                          style={{ flex: 1, minWidth: '100px', fontSize: '12px', padding: '6px' }}
+                          className="h-8 flex-1 min-w-[100px] text-xs"
                           required
                         />
-                        <input
+                        <Input
                           type="text"
                           placeholder="Valor"
                           value={f.value}
                           onChange={(e) => {
                             const updated = [...fields];
-                            updated[fIdx].value = e.target.value;
+                            updated[fIdx] = { ...updated[fIdx], value: e.target.value };
                             setFields(updated);
                           }}
-                          className="form-control"
-                          style={{ flex: 2, minWidth: '150px', fontSize: '12px', padding: '6px' }}
+                          className="h-8 min-w-[150px] flex-[2] text-xs"
                           required
                         />
-                        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#dbdee1', cursor: 'pointer' }}>
-                          <input
-                            type="checkbox"
+                        <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-foreground/80">
+                          <Switch
                             checked={f.inline || false}
-                            onChange={(e) => {
+                            onCheckedChange={(checked) => {
                               const updated = [...fields];
-                              updated[fIdx].inline = e.target.checked;
+                              updated[fIdx] = { ...updated[fIdx], inline: checked };
                               setFields(updated);
                             }}
                           />
                           Inline
                         </label>
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
                           onClick={() => setFields(fields.filter((_, idx) => idx !== fIdx))}
-                          style={{ background: 'none', border: 'none', color: '#da373c', cursor: 'pointer', padding: '4px' }}
                           title="Remover Campo"
                         >
-                          <Trash2 size={14} />
-                        </button>
+                          <Trash2 size={14} aria-hidden="true" />
+                        </Button>
                       </div>
                     ))}
                   </div>
@@ -678,30 +662,36 @@ export function PanelConfigForm({
               CONSTRUTOR DE BLOCOS INTERATIVO (Seção 20.2)
              ------------------------------------------------------------------- */}
           {renderMode === 'container' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 700, color: '#ffffff' }}>Blocos do Layout de Container</span>
+            <div className="flex flex-col gap-5">
+              <span className="text-sm font-bold text-foreground">Blocos do Layout de Container</span>
 
               {blocks.length === 0 ? (
-                <div style={{ padding: '24px', textAlign: 'center', border: '1px dashed var(--border)', borderRadius: '8px', color: '#949ba4' }}>
+                <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
                   Nenhum bloco no layout. Use o painel abaixo para começar.
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div className="flex flex-col gap-3">
                   {blocks.map((block, index) => {
                     const isEditing = editingBlockIndex === index;
                     return (
-                      <div key={index} style={{ border: '1px solid var(--border)', borderRadius: '8px', background: isEditing ? 'rgba(88, 101, 242, 0.05)' : 'rgba(255,255,255,0.02)', overflow: 'hidden' }}>
+                      <div
+                        key={index}
+                        className={cn(
+                          'overflow-hidden rounded-md border border-border',
+                          isEditing ? 'bg-primary/5' : 'bg-white/[0.02]'
+                        )}
+                      >
                         {/* Header do Card do Bloco */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'rgba(0,0,0,0.15)', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ textTransform: 'uppercase', fontSize: '9px', fontWeight: 800, background: '#4e5058', padding: '2px 6px', borderRadius: '3px', color: '#ffffff' }}>
+                        <div className="flex items-center justify-between border-b border-white/[0.03] bg-black/15 px-3.5 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="secondary" className="rounded text-[9px] uppercase tracking-wide">
                               {block.blockType === 'text' && 'Texto'}
                               {block.blockType === 'separator' && 'Divisor'}
                               {block.blockType === 'gallery' && 'Galeria'}
                               {block.blockType === 'section' && 'Seção'}
                               {block.blockType === 'file' && 'Anexo'}
-                            </span>
-                            <span style={{ fontSize: '12px', color: '#dbdee1', maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            </Badge>
+                            <span className="max-w-[200px] truncate text-xs text-foreground/80">
                               {block.blockType === 'text' && (block.content || 'Vazio')}
                               {block.blockType === 'separator' && (block.divider ? 'Linha visível' : 'Espaço em branco')}
                               {block.blockType === 'gallery' && `${block.items?.length || 0} imagem(ns)`}
@@ -711,61 +701,68 @@ export function PanelConfigForm({
                           </div>
 
                           {/* Ações do Bloco */}
-                          <div style={{ display: 'flex', gap: '4px' }}>
-                            <button
+                          <div className="flex items-center gap-1">
+                            <Button
                               type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
                               onClick={() => moveBlock(index, 'up')}
                               disabled={index === 0}
-                              style={{ background: 'none', border: 'none', color: index === 0 ? '#4e5058' : '#ffffff', cursor: index === 0 ? 'default' : 'pointer', padding: '4px' }}
                             >
-                              <ArrowUp size={14} />
-                            </button>
-                            <button
+                              <ArrowUp size={14} aria-hidden="true" />
+                            </Button>
+                            <Button
                               type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
                               onClick={() => moveBlock(index, 'down')}
                               disabled={index === blocks.length - 1}
-                              style={{ background: 'none', border: 'none', color: index === blocks.length - 1 ? '#4e5058' : '#ffffff', cursor: index === blocks.length - 1 ? 'default' : 'pointer', padding: '4px' }}
                             >
-                              <ArrowDown size={14} />
-                            </button>
-                            <button
+                              <ArrowDown size={14} aria-hidden="true" />
+                            </Button>
+                            <Button
                               type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-[11px]"
                               onClick={() => setEditingBlockIndex(isEditing ? null : index)}
-                              className="btn btn-secondary"
-                              style={{ padding: '2px 8px', fontSize: '10px' }}
                             >
                               {isEditing ? 'Fechar' : 'Editar'}
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-destructive hover:text-destructive"
                               onClick={() => removeBlock(index)}
-                              style={{ background: 'none', border: 'none', color: '#da373c', cursor: 'pointer', padding: '4px' }}
                             >
-                              <Trash2 size={14} />
-                            </button>
+                              <Trash2 size={14} aria-hidden="true" />
+                            </Button>
                           </div>
                         </div>
 
                         {/* Corpo/Editor Expandido */}
                         {isEditing && (
-                          <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <div className="flex flex-col gap-3 p-4">
                             {/* Editor de Bloco de Texto */}
                             {block.blockType === 'text' && (
-                              <div className="form-group">
-                                <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <span>Conteúdo do Texto</span>
+                              <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <Label>Conteúdo do Texto</Label>
                                   {/* Toolbar de Formatação */}
-                                  <div style={{ display: 'flex', gap: '4px' }}>
-                                    <button type="button" onClick={() => insertMarkdownInBlock(index, '**', '**')} style={styles.toolbarBtn} title="Negrito">B</button>
-                                    <button type="button" onClick={() => insertMarkdownInBlock(index, '*', '*')} style={styles.toolbarBtn} title="Itálico">I</button>
-                                    <button type="button" onClick={() => insertMarkdownInBlock(index, '__', '__')} style={styles.toolbarBtn} title="Sublinhado">U</button>
-                                    <button type="button" onClick={() => insertMarkdownInBlock(index, '~~', '~~')} style={styles.toolbarBtn} title="Riscado">S</button>
-                                    <button type="button" onClick={() => insertMarkdownInBlock(index, '||', '||')} style={styles.toolbarBtn} title="Spoiler">Spoiler</button>
-                                    <button type="button" onClick={() => insertMarkdownInBlock(index, '`', '`')} style={styles.toolbarBtn} title="Código Inline">`</button>
-                                    <button type="button" onClick={() => insertMarkdownInBlock(index, '```\n', '\n```')} style={styles.toolbarBtn} title="Bloco de Código">Bloco</button>
+                                  <div className="flex gap-1">
+                                    <ToolbarButton onClick={() => insertMarkdownInBlock(index, '**', '**')} title="Negrito">B</ToolbarButton>
+                                    <ToolbarButton onClick={() => insertMarkdownInBlock(index, '*', '*')} title="Itálico">I</ToolbarButton>
+                                    <ToolbarButton onClick={() => insertMarkdownInBlock(index, '__', '__')} title="Sublinhado">U</ToolbarButton>
+                                    <ToolbarButton onClick={() => insertMarkdownInBlock(index, '~~', '~~')} title="Riscado">S</ToolbarButton>
+                                    <ToolbarButton onClick={() => insertMarkdownInBlock(index, '||', '||')} title="Spoiler">Spoiler</ToolbarButton>
+                                    <ToolbarButton onClick={() => insertMarkdownInBlock(index, '`', '`')} title="Código Inline">`</ToolbarButton>
+                                    <ToolbarButton onClick={() => insertMarkdownInBlock(index, '```\n', '\n```')} title="Bloco de Código">Bloco</ToolbarButton>
                                   </div>
-                                </label>
-                                <textarea
+                                </div>
+                                <Textarea
                                   id={`block-editor-${index}`}
                                   value={block.content}
                                   onChange={(e) => {
@@ -774,125 +771,118 @@ export function PanelConfigForm({
                                     setBlocks(updated);
                                   }}
                                   placeholder="Digite o texto. Suporta markdown."
-                                  className="form-control"
                                   rows={4}
                                   required
                                 />
                                 {placeholders.length > 0 && (
-                                  <div style={styles.placeholdersContainer}>
-                                    {placeholders.map((ph) => (
-                                      <button
-                                        type="button"
-                                        key={ph}
-                                        onClick={() => insertPlaceholderInBlock(index, ph)}
-                                        style={styles.placeholderBtn}
-                                      >
-                                        + {`\${${ph}}`}
-                                      </button>
-                                    ))}
-                                  </div>
+                                  <PlaceholderChips placeholders={placeholders} onInsert={(ph) => insertPlaceholderInBlock(index, ph)} />
                                 )}
                               </div>
                             )}
 
                             {/* Editor de Divisor */}
                             {block.blockType === 'separator' && (
-                              <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
-                                <div className="form-group" style={{ flex: 1 }}>
-                                  <label className="form-label">Espaçamento</label>
-                                  <select
+                              <div className="flex items-center gap-5">
+                                <div className="flex-1 space-y-2">
+                                  <Label>Espaçamento</Label>
+                                  <Select
                                     value={block.spacing || 'small'}
-                                    onChange={(e) => {
+                                    onValueChange={(value) => {
                                       const updated = [...blocks];
-                                      updated[index] = { ...block, spacing: e.target.value as any };
+                                      updated[index] = { ...block, spacing: value as 'small' | 'large' };
                                       setBlocks(updated);
                                     }}
-                                    className="form-control"
                                   >
-                                    <option value="small">Pequeno (Small)</option>
-                                    <option value="large">Grande (Large)</option>
-                                  </select>
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="small">Pequeno (Small)</SelectItem>
+                                      <SelectItem value="large">Grande (Large)</SelectItem>
+                                    </SelectContent>
+                                  </Select>
                                 </div>
-                                <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '24px' }}>
-                                  <input
-                                    type="checkbox"
+                                <div className="flex items-center gap-2 pt-6">
+                                  <Switch
                                     id={`sep-line-${index}`}
                                     checked={block.divider !== false}
-                                    onChange={(e) => {
+                                    onCheckedChange={(checked) => {
                                       const updated = [...blocks];
-                                      updated[index] = { ...block, divider: e.target.checked };
+                                      updated[index] = { ...block, divider: checked };
                                       setBlocks(updated);
                                     }}
-                                    style={styles.checkbox}
                                   />
-                                  <label htmlFor={`sep-line-${index}`} style={styles.checkboxLabel}>Exibir linha divisória</label>
+                                  <Label htmlFor={`sep-line-${index}`} className="cursor-pointer font-normal">
+                                    Exibir linha divisória
+                                  </Label>
                                 </div>
                               </div>
                             )}
 
                             {/* Editor de Galeria */}
                             {block.blockType === 'gallery' && (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <span style={{ fontSize: '11px', fontWeight: 700 }}>Imagens da Galeria</span>
-                                  <button
+                              <div className="flex flex-col gap-2.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-bold">Imagens da Galeria</span>
+                                  <Button
                                     type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 px-2 text-[10px]"
                                     onClick={() => {
                                       const updated = [...blocks];
-                                      const currentItems = (block.items || []);
+                                      const currentItems = block.items || [];
                                       updated[index] = { ...block, items: [...currentItems, { url: '', alt: '' }] };
                                       setBlocks(updated);
                                     }}
-                                    className="btn btn-secondary"
-                                    style={{ padding: '2px 8px', fontSize: '9px' }}
                                   >
                                     + Adicionar Imagem
-                                  </button>
+                                  </Button>
                                 </div>
 
                                 {(block.items || []).map((item, imgIdx) => (
-                                  <div key={imgIdx} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                    <input
+                                  <div key={imgIdx} className="flex items-center gap-2">
+                                    <Input
                                       type="url"
                                       placeholder="URL da Imagem"
                                       value={item.url}
                                       onChange={(e) => {
                                         const updated = [...blocks];
                                         const newItems = [...(block.items || [])];
-                                        newItems[imgIdx].url = e.target.value;
+                                        newItems[imgIdx] = { ...newItems[imgIdx], url: e.target.value };
                                         updated[index] = { ...block, items: newItems };
                                         setBlocks(updated);
                                       }}
-                                      className="form-control"
-                                      style={{ flex: 2, fontSize: '12px' }}
+                                      className="h-8 flex-[2] text-xs"
                                       required
                                     />
-                                    <input
+                                    <Input
                                       type="text"
                                       placeholder="Alt Text (Acessibilidade)"
                                       value={item.alt}
                                       onChange={(e) => {
                                         const updated = [...blocks];
                                         const newItems = [...(block.items || [])];
-                                        newItems[imgIdx].alt = e.target.value;
+                                        newItems[imgIdx] = { ...newItems[imgIdx], alt: e.target.value };
                                         updated[index] = { ...block, items: newItems };
                                         setBlocks(updated);
                                       }}
-                                      className="form-control"
-                                      style={{ flex: 1, fontSize: '12px' }}
+                                      className="h-8 flex-1 text-xs"
                                     />
-                                    <button
+                                    <Button
                                       type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-7 w-7 text-destructive hover:text-destructive"
                                       onClick={() => {
                                         const updated = [...blocks];
                                         const newItems = (block.items || []).filter((_, iIdx) => iIdx !== imgIdx);
                                         updated[index] = { ...block, items: newItems };
                                         setBlocks(updated);
                                       }}
-                                      style={{ background: 'none', border: 'none', color: '#da373c', cursor: 'pointer' }}
                                     >
-                                      <Trash2 size={14} />
-                                    </button>
+                                      <Trash2 size={14} aria-hidden="true" />
+                                    </Button>
                                   </div>
                                 ))}
                               </div>
@@ -900,10 +890,10 @@ export function PanelConfigForm({
 
                             {/* Editor de Seção */}
                             {block.blockType === 'section' && (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                                <div className="form-group">
-                                  <label className="form-label">Texto da Seção</label>
-                                  <input
+                              <div className="flex flex-col gap-3">
+                                <div className="space-y-2">
+                                  <Label>Texto da Seção</Label>
+                                  <Input
                                     type="text"
                                     value={block.text}
                                     onChange={(e) => {
@@ -912,41 +902,46 @@ export function PanelConfigForm({
                                       setBlocks(updated);
                                     }}
                                     placeholder="Texto descritivo principal"
-                                    className="form-control"
                                     required
                                   />
                                 </div>
-                                <div style={{ border: '1px dashed var(--border)', borderRadius: '6px', padding: '12px', background: 'rgba(0,0,0,0.1)' }}>
-                                  <span style={{ fontSize: '11px', fontWeight: 700, display: 'block', marginBottom: '8px' }}>Acessório Lateral (Opcional)</span>
-                                  <div style={styles.row}>
-                                    <div className="form-group" style={{ flex: 1 }}>
-                                      <label className="form-label" style={{ fontSize: '11px' }}>Tipo</label>
-                                      <select
-                                        value={block.accessory?.type || ''}
-                                        onChange={(e) => {
+                                <div className="rounded-md border border-dashed border-border bg-black/10 p-3">
+                                  <span className="mb-2 block text-xs font-bold">Acessório Lateral (Opcional)</span>
+                                  <div className="flex flex-wrap gap-4">
+                                    <div className="flex-1 space-y-1.5">
+                                      <Label className="text-xs">Tipo</Label>
+                                      <Select
+                                        value={block.accessory?.type || 'none'}
+                                        onValueChange={(value) => {
                                           const updated = [...blocks];
-                                          const type = e.target.value as 'thumbnail' | 'button' | '';
+                                          const type = value === 'none' ? undefined : (value as 'thumbnail' | 'button');
                                           updated[index] = {
                                             ...block,
-                                            accessory: type ? { type, url: block.accessory?.url || '', label: block.accessory?.label || '' } : undefined,
+                                            accessory: type
+                                              ? { type, url: block.accessory?.url || '', label: block.accessory?.label || '' }
+                                              : undefined,
                                           };
                                           setBlocks(updated);
                                         }}
-                                        className="form-control"
-                                        style={{ fontSize: '12px' }}
                                       >
-                                        <option value="">Nenhum</option>
-                                        <option value="thumbnail">Miniatura (Thumbnail)</option>
-                                        <option value="button">Botão Acessório</option>
-                                      </select>
+                                        <SelectTrigger className="h-9 text-xs">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="none">Nenhum</SelectItem>
+                                          <SelectItem value="thumbnail">Miniatura (Thumbnail)</SelectItem>
+                                          <SelectItem value="button">Botão Acessório</SelectItem>
+                                        </SelectContent>
+                                      </Select>
                                     </div>
                                     {block.accessory?.type && (
-                                      <div className="form-group" style={{ flex: 2 }}>
-                                        <label className="form-label" style={{ fontSize: '11px' }}>
+                                      <div className="flex-[2] space-y-1.5">
+                                        <Label className="text-xs">
                                           {block.accessory.type === 'thumbnail' ? 'URL da Imagem' : 'Rótulo / Label'}
-                                        </label>
-                                        <input
+                                        </Label>
+                                        <Input
                                           type="text"
+                                          className="h-9 text-xs"
                                           value={block.accessory.type === 'thumbnail' ? block.accessory.url : block.accessory.label}
                                           onChange={(e) => {
                                             const updated = [...blocks];
@@ -960,8 +955,6 @@ export function PanelConfigForm({
                                             setBlocks(updated);
                                           }}
                                           placeholder={block.accessory.type === 'thumbnail' ? 'https://example.com/img.png' : 'Clique Aqui'}
-                                          className="form-control"
-                                          style={{ fontSize: '12px' }}
                                           required
                                         />
                                       </div>
@@ -973,9 +966,9 @@ export function PanelConfigForm({
 
                             {/* Editor de Anexo */}
                             {block.blockType === 'file' && (
-                              <div className="form-group">
-                                <label className="form-label">URL do Arquivo Anexo</label>
-                                <input
+                              <div className="space-y-2">
+                                <Label>URL do Arquivo Anexo</Label>
+                                <Input
                                   type="url"
                                   value={block.url}
                                   onChange={(e) => {
@@ -984,7 +977,6 @@ export function PanelConfigForm({
                                     setBlocks(updated);
                                   }}
                                   placeholder="https://exemplo.com/documento.pdf"
-                                  className="form-control"
                                   required
                                 />
                               </div>
@@ -998,175 +990,209 @@ export function PanelConfigForm({
               )}
 
               {/* Adicionar Blocos Menu */}
-              <div style={{ border: '1px dashed var(--border)', borderRadius: '8px', padding: '14px', background: 'rgba(0,0,0,0.1)' }}>
-                <span style={{ fontSize: '11px', fontWeight: 800, color: '#949ba4', textTransform: 'uppercase', display: 'block', marginBottom: '8px', textAlign: 'center' }}>+ Adicionar Componente ao Layout</span>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
-                  <button type="button" onClick={() => addBlock('text')} className="btn btn-secondary" style={styles.addBlockBtn}>+ Texto</button>
-                  <button type="button" onClick={() => addBlock('separator')} className="btn btn-secondary" style={styles.addBlockBtn}>+ Divisor</button>
-                  <button type="button" onClick={() => addBlock('gallery')} className="btn btn-secondary" style={styles.addBlockBtn}>+ Galeria</button>
-                  <button type="button" onClick={() => addBlock('section')} className="btn btn-secondary" style={styles.addBlockBtn}>+ Seção</button>
-                  <button type="button" onClick={() => addBlock('file')} className="btn btn-secondary" style={styles.addBlockBtn}>+ Anexo</button>
+              <div className="rounded-md border border-dashed border-border bg-black/10 p-3.5">
+                <span className="mb-2 block text-center text-[11px] font-extrabold uppercase tracking-wide text-muted-foreground">
+                  + Adicionar Componente ao Layout
+                </span>
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={() => addBlock('text')}>+ Texto</Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => addBlock('separator')}>+ Divisor</Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => addBlock('gallery')}>+ Galeria</Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => addBlock('section')}>+ Seção</Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => addBlock('file')}>+ Anexo</Button>
                 </div>
               </div>
             </div>
           )}
 
-          <div style={styles.row}>
-            <div className="form-group" style={{ flex: 1 }}>
-              <label className="form-label">Cor de Destaque</label>
-              <div style={styles.colorPickerWrapper}>
+          <div className="flex flex-wrap gap-4">
+            <div className="space-y-2">
+              <Label>Cor de Destaque</Label>
+              <div className="flex items-center gap-2">
                 <input
                   type="color"
                   value={accentColor}
                   onChange={(e) => setAccentColor(e.target.value)}
-                  style={styles.colorInput}
+                  className="h-10 w-10 cursor-pointer rounded border border-border bg-transparent p-0"
                 />
-                <input
+                <Input
                   type="text"
                   value={accentColor}
                   onChange={(e) => setAccentColor(e.target.value)}
-                  className="form-control"
-                  style={{ textTransform: 'uppercase' }}
+                  className="uppercase"
                 />
               </div>
             </div>
 
-            <div className="form-group" style={{ flex: 2 }}>
-              <label className="form-label">Canal de Destino</label>
-              <select
-                value={channelId}
-                onChange={(e) => setChannelId(e.target.value)}
-                className="form-control"
-              >
-                {channels.map((ch) => (
-                  <option key={ch.id} value={ch.id}>
-                    #{ch.name}
-                  </option>
-                ))}
-              </select>
+            <div className="min-w-[200px] flex-[2] space-y-2">
+              <Label>Canal de Destino</Label>
+              <Select value={channelId} onValueChange={setChannelId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione um canal" />
+                </SelectTrigger>
+                <SelectContent>
+                  {channels.map((ch) => (
+                    <SelectItem key={ch.id} value={ch.id}>
+                      #{ch.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
           {/* Configurações Específicas do Tipo */}
-          <div style={styles.sectionHeader}>Configurações de Função</div>
+          <SectionHeading>Configurações de Função</SectionHeading>
 
-          {(panelType.type === 'ticket_panel' || panelType.type === 'verification_panel') && (
-            <div className="form-group">
-              <label className="form-label">Texto do Botão Interativo</label>
-              <input
+          {BUTTON_LABEL_TYPES.includes(panelType.type) && (
+            <div className="space-y-2">
+              <Label htmlFor="field-button-label">Texto do Botão Interativo</Label>
+              <Input
+                id="field-button-label"
                 type="text"
                 value={buttonLabel}
                 onChange={(e) => setButtonLabel(e.target.value)}
-                placeholder={panelType.type === 'ticket_panel' ? 'Criar Ticket' : 'Verificar-se'}
-                className="form-control"
+                placeholder={(DEFAULT_CONTAINER_PAYLOADS[panelType.type as ContainerTypeId] as any)?.buttonLabel || 'Ex: Continuar'}
               />
+            </div>
+          )}
+
+          {panelType.type === 'registration_panel' && (
+            <div className="space-y-2">
+              <Label htmlFor="field-footer-signature">Assinatura do Rodapé</Label>
+              <Input
+                id="field-footer-signature"
+                type="text"
+                value={footerSignature}
+                onChange={(e) => setFooterSignature(e.target.value)}
+                placeholder="Ex: Sistema de Cadastro • Staff"
+              />
+            </div>
+          )}
+
+          {panelType.type === 'ranking_panel' && (
+            <div className="space-y-2">
+              <Label htmlFor="field-topn">Quantidade de Posições Exibidas (Top N)</Label>
+              <Input
+                id="field-topn"
+                type="number"
+                min={1}
+                max={25}
+                value={topN}
+                onChange={(e) => setTopN(Number(e.target.value) || 10)}
+                className="max-w-[140px]"
+              />
+              <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                <Info size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
+                O conteúdo deste painel é atualizado automaticamente a cada repost com os dados de ranking mais
+                recentes — diferente dos demais painéis, ele não é escrito manualmente aqui.
+              </p>
             </div>
           )}
 
           {panelType.type === 'welcome' && (
-            <div className="form-group" style={styles.checkboxGroup}>
-              <input
-                type="checkbox"
-                id="showMemberCount"
-                checked={showMemberCount}
-                onChange={(e) => setShowMemberCount(e.target.checked)}
-                style={styles.checkbox}
-              />
-              <label htmlFor="showMemberCount" style={styles.checkboxLabel}>
+            <div className="flex items-center gap-3">
+              <Switch id="showMemberCount" checked={showMemberCount} onCheckedChange={setShowMemberCount} />
+              <Label htmlFor="showMemberCount" className="cursor-pointer font-normal">
                 Exibir contagem total de membros na mensagem
-              </label>
+              </Label>
             </div>
           )}
 
           {panelType.type === 'announcement' && (
-            <div className="form-group">
-              <label className="form-label">ID da Role para Mencionador (Opcional)</label>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="field-mention-role">ID da Role para Mencionador (Opcional)</Label>
+              <Input
+                id="field-mention-role"
                 type="text"
                 value={mentionRoleId}
                 onChange={(e) => setMentionRoleId(e.target.value)}
                 placeholder="Ex: 123456789012345678"
-                className="form-control"
               />
             </div>
           )}
 
           {isSticky && (
-            <div className="form-group">
-              <label className="form-label">Intervalo de Repostagem (Segundos)</label>
-              <select
-                value={repostDelay}
-                onChange={(e) => setRepostDelay(Number(e.target.value))}
-                className="form-control"
-              >
-                <option value={10}>10 segundos</option>
-                <option value={30}>30 segundos (Recomendado)</option>
-                <option value={60}>1 minuto</option>
-                <option value={300}>5 minutos</option>
-              </select>
+            <div className="space-y-2">
+              <Label>Intervalo de Repostagem (Segundos)</Label>
+              <Select value={String(repostDelay)} onValueChange={(value) => setRepostDelay(Number(value))}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10 segundos</SelectItem>
+                  <SelectItem value="30">30 segundos (Recomendado)</SelectItem>
+                  <SelectItem value="60">1 minuto</SelectItem>
+                  <SelectItem value="300">5 minutos</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           )}
 
           {/* Webhook customizado (PRO GATE) */}
-          <div style={styles.sectionHeader}>
-            <span>Webhook Customizado (Identidade Própria)</span>
-            {!isPro && <span style={styles.proBadge}><Sparkles size={10} /> Recurso Pro</span>}
+          <div className="mt-3 flex items-center justify-between border-b border-primary/20 pb-2">
+            <span className="font-display text-xs font-bold uppercase tracking-wide text-primary">
+              Webhook Customizado (Identidade Própria)
+            </span>
+            {!isPro && (
+              <Badge variant="outline" className="gap-1 border-primary/40 text-primary">
+                <Sparkles size={10} aria-hidden="true" /> Recurso Pro
+              </Badge>
+            )}
           </div>
 
-          <div style={isPro ? {} : styles.proDisabledWrapper}>
-            <div className="form-group">
-              <label className="form-label">Nome do Webhook</label>
-              <input
-                type="text"
-                value={webhookName}
-                onChange={(e) => setWebhookName(e.target.value)}
-                placeholder="Ex: Suporte Dave"
-                className="form-control"
-                disabled={!isPro}
-              />
-            </div>
+          <div className={cn('relative rounded-md', !isPro && 'overflow-hidden')}>
+            <div className="flex flex-col gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="field-webhook-name">Nome do Webhook</Label>
+                <Input
+                  id="field-webhook-name"
+                  type="text"
+                  value={webhookName}
+                  onChange={(e) => setWebhookName(e.target.value)}
+                  placeholder="Ex: Suporte Dave"
+                  disabled={!isPro}
+                />
+              </div>
 
-            <div className="form-group">
-              <label className="form-label">URL da Imagem do Avatar</label>
-              <input
-                type="url"
-                value={webhookAvatar}
-                onChange={(e) => setWebhookAvatar(e.target.value)}
-                placeholder="https://exemplo.com/avatar.png"
-                className="form-control"
-                disabled={!isPro}
-              />
+              <div className="space-y-2">
+                <Label htmlFor="field-webhook-avatar">URL da Imagem do Avatar</Label>
+                <Input
+                  id="field-webhook-avatar"
+                  type="url"
+                  value={webhookAvatar}
+                  onChange={(e) => setWebhookAvatar(e.target.value)}
+                  placeholder="https://exemplo.com/avatar.png"
+                  disabled={!isPro}
+                />
+              </div>
             </div>
 
             {!isPro && (
-              <div style={styles.proOverlay}>
-                <Sparkles size={24} style={{ color: '#ffc44f', marginBottom: '8px' }} />
-                <h4 style={styles.proOverlayTitle}>Disponível apenas no plano Pro</h4>
-                <p style={styles.proOverlayText}>
-                  Personalize a imagem e o nome do remetente das mensagens do bot para combinar com a identidade visual da sua comunidade.
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-md border border-primary/20 bg-background/90 p-5 text-center backdrop-blur-[3px]">
+                <Sparkles size={24} className="mb-2 text-primary" aria-hidden="true" />
+                <h4 className="mb-1 text-sm font-bold text-foreground">Disponível apenas no plano Pro</h4>
+                <p className="mb-4 max-w-[260px] text-xs leading-relaxed text-muted-foreground">
+                  Personalize a imagem e o nome do remetente das mensagens do bot para combinar com a identidade
+                  visual da sua comunidade.
                 </p>
-                <Link href={`/dashboard/${guildId}/subscription`} className="btn btn-primary" style={{ padding: '8px 16px', fontSize: '13px' }}>
-                  Fazer Upgrade para Pro
-                </Link>
+                <Button asChild size="sm">
+                  <Link href={`/dashboard/${guildId}/subscription`}>Fazer Upgrade para Pro</Link>
+                </Button>
               </div>
             )}
           </div>
 
-          <button
-            type="submit"
-            disabled={saving}
-            className="btn btn-primary"
-            style={styles.submitBtn}
-          >
+          <Button type="submit" disabled={saving} size="lg" className="mt-2">
             <Save size={16} aria-hidden="true" />
             {saving ? 'Salvando Painel...' : 'Salvar e Publicar no Discord'}
-          </button>
+          </Button>
         </form>
       </div>
 
       {/* Coluna 2: Preview em Tempo Real */}
-      <div style={styles.previewCol}>
-        <div style={styles.previewHeader}>
+      <div className="min-w-[340px] flex-1 md:border-l md:border-border md:pl-10">
+        <div className="mb-5 flex items-center gap-2 text-sm font-semibold text-muted-foreground">
           <Eye size={16} aria-hidden="true" /> Preview no Discord (Tempo Real)
         </div>
 
@@ -1176,18 +1202,14 @@ export function PanelConfigForm({
             {botAvatar ? (
               <img src={botAvatar} alt="Bot Avatar" style={styles.avatarImg} />
             ) : (
-              <div style={styles.discordAvatarPlaceholder}>
-                {botName.slice(0, 1).toUpperCase()}
-              </div>
+              <div style={styles.discordAvatarPlaceholder}>{botName.slice(0, 1).toUpperCase()}</div>
             )}
           </div>
 
           {/* Discord Content */}
           <div style={styles.discordContent}>
             <div style={styles.discordUserHeader}>
-              <span style={styles.discordUsername}>
-                {botName}
-              </span>
+              <span style={styles.discordUsername}>{botName}</span>
               <span style={styles.discordBotTag}>BOT</span>
               <span style={styles.discordTimestamp}>Hoje às 19:40</span>
             </div>
@@ -1195,11 +1217,7 @@ export function PanelConfigForm({
             {/* Discord Embed vs Layout de Container */}
             {renderMode === 'container' ? (
               <div style={styles.discordContainerLayout}>
-                {title && (
-                  <div style={styles.discordContainerTitle}>
-                    {title}
-                  </div>
-                )}
+                {title && <div style={styles.discordContainerTitle}>{title}</div>}
                 {blocks.map((block, bIdx) => {
                   if (block.blockType === 'text') {
                     return (
@@ -1320,17 +1338,24 @@ export function PanelConfigForm({
               </div>
             )}
 
-            {/* Discord Buttons */}
-            {(panelType.type === 'ticket_panel' || panelType.type === 'verification_panel') && (
+            {/* Discord Buttons — espelha resolveActionButton do renderer.ts */}
+            {(DEFAULT_CONTAINER_PAYLOADS[panelType.type as ContainerTypeId] as any)?.buttonLabel && (
               <div style={styles.discordButtons}>
                 <div
                   style={{
                     ...styles.discordButton,
-                    backgroundColor: panelType.type === 'ticket_panel' ? '#5865f2' : '#248046',
+                    backgroundColor: DISCORD_BUTTON_COLOR[panelType.type],
                   }}
                 >
-                  {buttonLabel || (panelType.type === 'ticket_panel' ? 'Criar Ticket' : 'Verificar-se')}
+                  {buttonLabel || (DEFAULT_CONTAINER_PAYLOADS[panelType.type as ContainerTypeId] as any)?.buttonLabel}
                 </div>
+              </div>
+            )}
+
+            {/* Ranking não tem botão — conteúdo é gerado dinamicamente no repost */}
+            {panelType.type === 'ranking_panel' && (
+              <div className="mt-2 rounded border border-dashed border-white/10 px-3 py-2 text-xs italic text-white/50">
+                O conteúdo deste painel (posições do ranking) é preenchido automaticamente pelo bot a cada repost.
               </div>
             )}
           </div>
@@ -1340,137 +1365,55 @@ export function PanelConfigForm({
   );
 }
 
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mt-3 border-b border-primary/20 pb-2 font-display text-xs font-bold uppercase tracking-wide text-primary">
+      {children}
+    </div>
+  );
+}
+
+function PlaceholderChips({ placeholders, onInsert }: { placeholders: string[]; onInsert: (placeholder: string) => void }) {
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {placeholders.map((ph) => (
+        <Button
+          type="button"
+          key={ph}
+          variant="outline"
+          size="sm"
+          className="h-7 px-2 font-mono text-[11px]"
+          onClick={() => onInsert(ph)}
+        >
+          + {`\${${ph}}`}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+function ToolbarButton({
+  onClick,
+  title,
+  children,
+}: {
+  onClick: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Button type="button" variant="outline" size="sm" className="h-6 px-1.5 text-[10px] font-bold" onClick={onClick} title={title}>
+      {children}
+    </Button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Estilos do mock de preview do Discord — reproduzem fielmente a UI/paleta
+// real do Discord (não são tokens do design system do próprio dashboard,
+// por isso permanecem como cores/valores literais).
+// ---------------------------------------------------------------------------
 const styles: Record<string, React.CSSProperties> = {
-  splitLayout: {
-    display: 'flex',
-    gap: '40px',
-    flexWrap: 'wrap',
-  },
-  formCol: {
-    flex: 1,
-    minWidth: '340px',
-  },
-  previewCol: {
-    flex: 1,
-    minWidth: '340px',
-    borderLeft: '1px solid rgba(255, 255, 255, 0.05)',
-    paddingLeft: '40px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '20px',
-  },
-  formTitle: {
-    fontSize: '18px',
-    fontWeight: 800,
-    color: '#ffffff',
-    marginBottom: '8px',
-  },
-  formSubtitle: {
-    fontSize: '13px',
-    color: '#949ba4',
-    marginBottom: '24px',
-  },
-  form: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '20px',
-  },
-  sectionHeader: {
-    fontSize: '13px',
-    fontWeight: 700,
-    color: '#5865f2',
-    borderBottom: '1px solid rgba(88, 101, 242, 0.2)',
-    paddingBottom: '8px',
-    marginTop: '12px',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  row: {
-    display: 'flex',
-    gap: '16px',
-    flexWrap: 'wrap',
-  },
-  colorPickerWrapper: {
-    display: 'flex',
-    gap: '8px',
-    alignItems: 'center',
-  },
-  colorInput: {
-    width: '40px',
-    height: '40px',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    background: 'none',
-    padding: 0,
-  },
-  submitBtn: {
-    marginTop: '16px',
-    padding: '12px',
-    fontSize: '14px',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    fontWeight: 700,
-  },
-  proBadge: {
-    background: 'rgba(255, 196, 79, 0.15)',
-    color: '#ffc44f',
-    padding: '2px 6px',
-    borderRadius: '4px',
-    fontSize: '10px',
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '4px',
-  },
-  proDisabledWrapper: {
-    position: 'relative',
-    borderRadius: '8px',
-    overflow: 'hidden',
-  },
-  proOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(10, 11, 16, 0.9)',
-    backdropFilter: 'blur(3px)',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    textAlign: 'center',
-    padding: '20px',
-    border: '1px solid rgba(255, 196, 79, 0.2)',
-    borderRadius: '8px',
-    zIndex: 10,
-  },
-  proOverlayTitle: {
-    color: '#ffffff',
-    fontSize: '14px',
-    fontWeight: 700,
-    marginBottom: '4px',
-  },
-  proOverlayText: {
-    color: '#949ba4',
-    fontSize: '12px',
-    maxWidth: '260px',
-    marginBottom: '16px',
-    lineHeight: '1.4',
-  },
-  previewHeader: {
-    fontSize: '14px',
-    fontWeight: 700,
-    color: '#949ba4',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
   discordMessageWrapper: {
     background: '#313338',
     padding: '16px',
@@ -1574,80 +1517,6 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     userSelect: 'none',
   },
-  errorAlert: {
-    background: 'rgba(218, 55, 60, 0.15)',
-    border: '1px solid rgba(218, 55, 60, 0.3)',
-    color: '#f25c60',
-    padding: '12px 16px',
-    borderRadius: '8px',
-    fontSize: '13px',
-    marginBottom: '20px',
-  },
-  checkboxGroup: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: '10px',
-  },
-  checkbox: {
-    width: '18px',
-    height: '18px',
-    accentColor: '#5865f2',
-    cursor: 'pointer',
-  },
-  checkboxLabel: {
-    fontSize: '13px',
-    color: '#f2f3f5',
-    fontWeight: 500,
-    cursor: 'pointer',
-  },
-  toggleGroup: {
-    display: 'flex',
-    background: 'rgba(0, 0, 0, 0.2)',
-    padding: '4px',
-    borderRadius: '8px',
-    border: '1px solid var(--border)',
-    gap: '4px',
-  },
-  toggleBtn: {
-    flex: 1,
-    padding: '10px',
-    background: 'none',
-    border: 'none',
-    borderRadius: '6px',
-    color: '#949ba4',
-    fontSize: '13px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    transition: 'all 0.15s ease',
-  },
-  toggleBtnActive: {
-    background: '#5865f2',
-    color: '#ffffff',
-    boxShadow: '0 2px 8px rgba(88, 101, 242, 0.3)',
-  },
-  helpText: {
-    fontSize: '12px',
-    color: '#6e7681',
-    marginTop: '6px',
-  },
-  placeholdersContainer: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '6px',
-    marginTop: '8px',
-  },
-  placeholderBtn: {
-    fontSize: '11px',
-    background: 'rgba(255, 255, 255, 0.03)',
-    border: '1px solid var(--border)',
-    borderRadius: '4px',
-    color: '#f2f3f5',
-    padding: '4px 8px',
-    cursor: 'pointer',
-    fontFamily: 'monospace',
-    transition: 'all 0.1s ease',
-  },
   discordContainerLayout: {
     background: '#2b2d31',
     borderRadius: '8px',
@@ -1673,24 +1542,5 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '14px',
     lineHeight: '1.5',
     whiteSpace: 'pre-wrap',
-  },
-  toolbarBtn: {
-    background: 'rgba(255, 255, 255, 0.05)',
-    border: '1px solid var(--border)',
-    color: '#ffffff',
-    borderRadius: '4px',
-    padding: '2px 6px',
-    fontSize: '10px',
-    cursor: 'pointer',
-    fontWeight: 600,
-  },
-  addBlockBtn: {
-    fontSize: '11px',
-    padding: '6px 12px',
-  },
-  fieldRow: {
-    display: 'flex',
-    gap: '8px',
-    alignItems: 'center',
   },
 };

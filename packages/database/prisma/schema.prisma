@@ -65,6 +65,11 @@ model Guild {
   botAddedAt DateTime  @default(now())
   botRemovedAt DateTime? // preenchido se o bot for removido/kickado, para histórico
   isActive   Boolean   @default(true)
+  // true somente quando o bot de fato entrou na guild (handleGuildOnboarding).
+  // Nunca escrito pelo upsert de login (auth callback) nem pelo guild-sync do
+  // billing-worker — ambos podem criar/atualizar Guild rows para guilds "fantasma"
+  // (o usuário administra o servidor no Discord, mas o bot nunca foi adicionado).
+  botPresent Boolean   @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -74,6 +79,15 @@ model Guild {
   auditLogs     AuditLog[]
   settings      GuildSettings?
   containers    GuildContainer[]
+  inventoryItems         InventoryItem[]
+  inventoryMovements     InventoryMovement[]
+  inventoryLocations     InventoryLocation[]
+  illegalActions         IllegalAction[]
+  illegalActionCities    IllegalActionCity[]
+  illegalActionTypes     IllegalActionType[]
+  weeklyGoalSubmissions  WeeklyGoalSubmission[]
+  characterRegistrations CharacterRegistration[]
+  featureLogConfigs      FeatureLogConfig[]
 
   @@map("guilds")
 }
@@ -258,4 +272,199 @@ model AuditLog {
 
   @@index([guildId, createdAt])
   @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Sistema de Baú (Inventário Compartilhado)
+// ---------------------------------------------------------------------------
+
+model InventoryItem {
+  id              String   @id @default(uuid())
+  guildId         String
+  guild           Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  // Localização opcional — null = item pertence ao "baú geral" sem localização específica
+  locationId      String?
+  location        InventoryLocation? @relation(fields: [locationId], references: [id])
+  name            String
+  description     String?
+  iconUrl         String?
+  currentQuantity Int      @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  movements       InventoryMovement[]
+
+  @@index([guildId, isActive])
+  @@index([locationId])
+  @@map("inventory_items")
+}
+
+model InventoryMovement {
+  id                String   @id @default(uuid())
+  itemId            String
+  item              InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  guildId           String
+  guild             Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  quantityDelta     Int
+  resultingQuantity Int
+  performedByUserId String   // Discord User ID or internal user ID
+  reason            String?
+  createdAt         DateTime @default(now())
+
+  @@index([guildId, itemId])
+  @@map("inventory_movements")
+}
+
+// ---------------------------------------------------------------------------
+// Localizações de Baú (ex: QG, Casa X, Casa Y)
+// Seção 26.1 do PLAN.md
+// ---------------------------------------------------------------------------
+
+model InventoryLocation {
+  id             String   @id @default(uuid())
+  guildId        String
+  guild          Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  name           String
+  // roles com permissão de ver esta localização — vazio = visível a todos
+  allowedRoleIds String[]
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  items          InventoryItem[]
+
+  @@index([guildId])
+  @@map("inventory_locations")
+}
+
+// ---------------------------------------------------------------------------
+// Sistema de Central de Ações & Metas Semanais
+// ---------------------------------------------------------------------------
+
+model IllegalAction {
+  id                String   @id @default(uuid())
+  guildId           String
+  guild             Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  // Cidade e tipo de ação são obrigatórios para novos registros (seção 26.2).
+  // nullable para retrocompatibilidade com registros históricos sem cidade/tipo.
+  cityId            String?
+  city              IllegalActionCity? @relation(fields: [cityId], references: [id])
+  actionTypeId      String?
+  actionType        IllegalActionType? @relation(fields: [actionTypeId], references: [id])
+  outcome           String   // "WON" | "LOST"
+  amount            Int
+  registeredByUserId String
+  createdAt         DateTime @default(now())
+
+  participants      IllegalActionParticipant[]
+
+  @@index([guildId])
+  @@index([cityId])
+  @@map("illegal_actions")
+}
+
+model IllegalActionParticipant {
+  id            String        @id @default(uuid())
+  actionId      String
+  action        IllegalAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  discordUserId String
+  shareAmount   Int?
+
+  @@index([actionId])
+  @@map("illegal_action_participants")
+}
+
+// ---------------------------------------------------------------------------
+// Cidades e Tipos de Ação Ilegal (configuráveis por servidor)
+// Seção 26.2 do PLAN.md
+// ---------------------------------------------------------------------------
+
+model IllegalActionCity {
+  id        String   @id @default(uuid())
+  guildId   String
+  guild     Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  actionTypes IllegalActionType[]
+  actions     IllegalAction[]
+
+  @@index([guildId])
+  @@map("illegal_action_cities")
+}
+
+model IllegalActionType {
+  id              String            @id @default(uuid())
+  cityId          String
+  city            IllegalActionCity @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  guildId         String
+  guild           Guild             @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  name            String
+  // null = usa o limite padrão configurado em GuildSettings.data.defaultMaxParticipants
+  maxParticipants Int?
+  isActive        Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  actions         IllegalAction[]
+
+  @@index([cityId])
+  @@index([guildId])
+  @@map("illegal_action_types")
+}
+
+model WeeklyGoalSubmission {
+  id                String   @id @default(uuid())
+  guildId           String
+  guild             Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  discordUserId     String
+  weekStartDate     DateTime
+  amountDelivered   Int
+  registeredByUserId String
+  createdAt         DateTime @default(now())
+
+  @@index([guildId, discordUserId, weekStartDate])
+  @@map("weekly_goal_submissions")
+}
+
+// ---------------------------------------------------------------------------
+// Sistema de Cadastro de Personagem
+// ---------------------------------------------------------------------------
+
+model CharacterRegistration {
+  id                   String   @id @default(uuid())
+  guildId              String
+  guild                Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  discordUserId        String
+  characterName        String
+  characterServerId    Int
+  phoneNumber          String
+  referredByUserId     String?
+  status               String   // "PENDING" | "VERIFIED" | "MISMATCH" | "REJECTED"
+  nicknameAtSubmission String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([guildId, discordUserId])
+  @@map("character_registrations")
+}
+
+// ---------------------------------------------------------------------------
+// Configurações de Log
+// ---------------------------------------------------------------------------
+
+model FeatureLogConfig {
+  id        String   @id @default(uuid())
+  guildId   String
+  guild     Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  feature   String   // "INVENTORY" | "CENTRAL" | "REGISTRATION"
+  channelId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([guildId, feature])
+  @@map("feature_log_configs")
 }

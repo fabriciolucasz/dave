@@ -6,41 +6,32 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('Iniciando seed de planos de assinatura...');
 
+  // Seção 17.2 do PLAN.md: apenas Standard e Business — sem plano Free.
+  // Preços em centavos (BRL). Valores de ponto de partida — validar com o nicho antes de lançar.
   const plans = [
     {
-      code: 'free',
-      name: 'Gratuito',
-      priceCents: 0,
+      code: 'standard',
+      name: 'Standard',
+      priceCents: 7990, // ~R$ 79,90/mês
       currency: 'BRL',
       features: {
-        maxActiveContainers: 1,
+        // Features iguais nos dois planos para as funcionalidades centrais (seção 17.2)
         customWebhookEnabled: false,
         queuePriority: false,
-        maxBillingAdmins: 1,
-      },
-    },
-    {
-      code: 'pro',
-      name: 'Pro',
-      priceCents: 2990,
-      currency: 'BRL',
-      features: {
-        maxActiveContainers: -1, // Ilimitado
-        customWebhookEnabled: true,
-        queuePriority: false,
+        centralHistoryDays: 90,
         maxBillingAdmins: 1,
       },
     },
     {
       code: 'business',
       name: 'Business',
-      priceCents: 9990,
+      priceCents: 14990, // ~R$ 149,90/mês
       currency: 'BRL',
       features: {
-        maxActiveContainers: -1, // Ilimitado
-        customWebhookEnabled: true,
+        customWebhookEnabled: true,  // Feature-bandeira do plano Business (seção 18.3)
         queuePriority: true,
-        maxBillingAdmins: 5,
+        centralHistoryDays: -1,      // Ilimitado
+        maxBillingAdmins: -1,        // Vários
       },
     },
   ];

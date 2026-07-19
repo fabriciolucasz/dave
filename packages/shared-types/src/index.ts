@@ -73,10 +73,12 @@ export interface ContainerRepostJobData {
 }
 
 export interface GuildOnboardingJobData {
-  type: 'guild_onboarding';
+  type: 'guild_onboarding' | 'guild_offboarding';
   guildId: string;
-  ownerDiscordId: string;
-  guildName: string;
+  /** Presente apenas quando type = 'guild_onboarding'. */
+  ownerDiscordId?: string;
+  /** Presente apenas quando type = 'guild_onboarding'. */
+  guildName?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +106,8 @@ export type PaymentProvider = 'STRIPE' | 'MERCADO_PAGO';
 export interface SubscriptionCheckResult {
   isActive: boolean;
   status: SubscriptionStatus;
-  planCode: string;
+  /** Código do plano ativo. null quando não há assinatura ativa (sem plano Free — seção 17.1). */
+  planCode: string | null;
   /** ISO 8601 — quando a assinatura expira (ou expirou). */
   currentPeriodEnd: string;
 }

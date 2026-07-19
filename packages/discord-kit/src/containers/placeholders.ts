@@ -14,6 +14,15 @@ export function getAvailablePlaceholders(type: ContainerType): string[] {
       return ['serverName'];
     case 'announcement':
       return ['serverName', 'authorName'];
+    case 'inventory_panel':
+    case 'illegal_action_panel':
+    case 'ranking_panel':
+    case 'weekly_goal_panel':
+      return ['serverName'];
+    case 'registration_panel':
+      // Como o announcement, o cadastro tem um conceito de atribuição
+      // (quem preside/revisa o cadastro), então expõe authorName também.
+      return ['serverName', 'authorName'];
     default:
       return [];
   }

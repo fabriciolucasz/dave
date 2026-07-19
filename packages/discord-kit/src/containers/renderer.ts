@@ -12,6 +12,7 @@ import {
   ThumbnailBuilder,
   ButtonBuilder,
   ButtonStyle,
+  MessageFlags,
 } from 'discord.js';
 
 export interface ParsedBlock {
@@ -57,10 +58,61 @@ export function parseContainerDescription(text: string): ParsedBlock[] {
   return blocks;
 }
 
+/** Botão de ação resolvido para um `ContainerPayload.type`, ou `null` se o tipo não tiver botão. */
+interface ResolvedActionButton {
+  label: string;
+  style: number; // ButtonStyle numérico (payload JSON bruto, não instância de discord.js)
+  customId: string;
+}
+
+/**
+ * Resolve o botão de ação (se houver) para o tipo de painel, na forma crua usada
+ * pelo payload JSON enviado ao Discord (`type: 2`, `style`, `custom_id`).
+ *
+ * `custom_id` deve bater exatamente com o namespace/ação registrados em
+ * `apps/bot-worker/src/interactions/router.ts` — qualquer divergência quebra o
+ * botão silenciosamente em runtime (sem erro de compilação).
+ *
+ * `welcome`, `rules_panel`, `announcement` e `ranking_panel` não têm botão:
+ * o ranking é renderizado ao vivo no corpo do painel (ver container-repost.ts).
+ */
+function resolveActionButton(payload: ContainerPayload, resolvedButtonLabel: string): ResolvedActionButton | null {
+  switch (payload.type) {
+    case 'ticket_panel':
+      return { label: resolvedButtonLabel || 'Criar Ticket', style: ButtonStyle.Primary, customId: 'ticket:open' };
+    case 'verification_panel':
+      return { label: resolvedButtonLabel || 'Verificar-se', style: ButtonStyle.Success, customId: 'verify:start' };
+    case 'inventory_panel':
+      return { label: resolvedButtonLabel || 'Ver Baú', style: ButtonStyle.Secondary, customId: 'inventory:view' };
+    case 'illegal_action_panel':
+      return { label: resolvedButtonLabel || 'Registrar Ação', style: ButtonStyle.Danger, customId: 'central:register_action' };
+    case 'weekly_goal_panel':
+      return { label: resolvedButtonLabel || 'Registrar Meta', style: ButtonStyle.Success, customId: 'central:register_goal' };
+    case 'registration_panel':
+      return { label: resolvedButtonLabel || 'Cadastrar Personagem', style: ButtonStyle.Primary, customId: 'registration:start' };
+    default:
+      return null;
+  }
+}
+
+function buildActionRow(button: ResolvedActionButton): Record<string, any> {
+  return {
+    type: 1, // ActionRow
+    components: [
+      {
+        type: 2, // Button
+        style: button.style,
+        label: button.label,
+        custom_id: button.customId,
+      },
+    ],
+  };
+}
+
 /**
  * Converte o ContainerPayload estruturado (da Seção 18 e 20) em um payload JSON compatível
  * com o envio de mensagens do Discord (usado na API de webhooks/reposts).
- * 
+ *
  * Se context for fornecido, resolve variáveis dinâmicas APENAS no campo de descrição e blocos de texto.
  */
 export function buildContainerDiscordPayload(
@@ -172,30 +224,9 @@ export function buildContainerDiscordPayload(
     const actionComponents: any[] = [];
 
     // Componentes específicos para botões e interações
-    if (payload.type === 'ticket_panel') {
-      actionComponents.push({
-        type: 1, // ActionRow
-        components: [
-          {
-            type: 2, // Button
-            style: 1, // Primary
-            label: resolvedButtonLabel || 'Criar Ticket',
-            custom_id: 'ticket:open',
-          },
-        ],
-      });
-    } else if (payload.type === 'verification_panel') {
-      actionComponents.push({
-        type: 1, // ActionRow
-        components: [
-          {
-            type: 2, // Button
-            style: 3, // Success
-            label: resolvedButtonLabel || 'Verificar-se',
-            custom_id: 'verify:start',
-          },
-        ],
-      });
+    const actionButton = resolveActionButton(payload, resolvedButtonLabel);
+    if (actionButton) {
+      actionComponents.push(buildActionRow(actionButton));
     }
 
     return {
@@ -203,6 +234,7 @@ export function buildContainerDiscordPayload(
         container.toJSON(),
         ...actionComponents,
       ],
+      flags: MessageFlags.IsComponentsV2,
     };
   }
 
@@ -269,30 +301,9 @@ export function buildContainerDiscordPayload(
   const components: any[] = [];
 
   // Componentes específicos para botões e interações
-  if (payload.type === 'ticket_panel') {
-    components.push({
-      type: 1, // ActionRow
-      components: [
-        {
-          type: 2, // Button
-          style: 1, // Primary
-          label: resolvedButtonLabel || 'Criar Ticket',
-          custom_id: 'ticket:open',
-        },
-      ],
-    });
-  } else if (payload.type === 'verification_panel') {
-    components.push({
-      type: 1, // ActionRow
-      components: [
-        {
-          type: 2, // Button
-          style: 3, // Success
-          label: resolvedButtonLabel || 'Verificar-se',
-          custom_id: 'verify:start',
-        },
-      ],
-    });
+  const embedActionButton = resolveActionButton(payload, resolvedButtonLabel);
+  if (embedActionButton) {
+    components.push(buildActionRow(embedActionButton));
   }
 
   return {

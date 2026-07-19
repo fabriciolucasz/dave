@@ -12,7 +12,24 @@ import { rest } from '../index.js';
 // ---------------------------------------------------------------------------
 
 export async function handleGuildOnboarding(data: GuildOnboardingJobData): Promise<void> {
+  if (data.type === 'guild_offboarding') {
+    console.log(`[Onboarding] Processando offboarding para a guild: ${data.guildId}`);
+    await prisma.guild.updateMany({
+      where: { discordId: data.guildId },
+      data: { botPresent: false, botRemovedAt: new Date() },
+    });
+    return;
+  }
+
   const { guildId, ownerDiscordId, guildName } = data;
+
+  // guildOnboardingJobData mantém ownerDiscordId/guildName opcionais para acomodar o
+  // variant 'guild_offboarding' (tratado acima); o fluxo de 'guild_onboarding' sempre
+  // os envia, mas fazemos a guarda em runtime para satisfazer o narrowing do TS.
+  if (!ownerDiscordId || !guildName) {
+    console.error(`[Onboarding] Dados incompletos para onboarding da guild ${guildId}: ownerDiscordId/guildName ausentes.`);
+    return;
+  }
 
   console.log(`[Onboarding] Iniciando onboarding para a guild: ${guildName} (${guildId})`);
 
@@ -28,13 +45,14 @@ export async function handleGuildOnboarding(data: GuildOnboardingJobData): Promi
         name: guildName,
         ownerDiscordId,
         isActive: true,
+        botPresent: true,
       },
     });
   } else {
     // Se a guild existia (talvez desativada), reativa-la
     await prisma.guild.update({
       where: { id: guild.id },
-      data: { isActive: true, name: guildName, ownerDiscordId },
+      data: { isActive: true, name: guildName, ownerDiscordId, botPresent: true },
     });
   }
 
@@ -72,15 +90,15 @@ export async function handleGuildOnboarding(data: GuildOnboardingJobData): Promi
   });
 
   if (!existingSub) {
-    const proPlan = await prisma.plan.findFirst({
-      where: { code: 'pro' },
+    const standardPlan = await prisma.plan.findFirst({
+      where: { code: 'standard' },
     });
 
-    if (proPlan) {
+    if (standardPlan) {
       await prisma.subscription.create({
         data: {
           guildId: guild.id,
-          planId: proPlan.id,
+          planId: standardPlan.id,
           createdByUserId: ownerUser.id,
           status: 'TRIALING',
           currentPeriodStart: new Date(),
@@ -88,7 +106,7 @@ export async function handleGuildOnboarding(data: GuildOnboardingJobData): Promi
           provider: 'MERCADO_PAGO',
         },
       });
-      console.log(`[Onboarding] Trial automático de 7 dias do plano Pro ativado para a guild: ${guildName}`);
+      console.log(`[Onboarding] Trial automático de 7 dias do plano Standard ativado para a guild: ${guildName}`);
     }
   }
 

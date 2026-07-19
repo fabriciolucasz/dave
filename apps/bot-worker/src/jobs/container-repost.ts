@@ -3,8 +3,54 @@ import { Routes } from 'discord.js';
 import type { ContainerRepostJobData } from '@dave/shared-types';
 import { rest } from '../index.js';
 import { containerRepostQueue } from '@dave/queue';
-import { buildContainerDiscordPayload } from '@dave/discord-kit';
+import { buildContainerDiscordPayload, type RankingPanelPayload } from '@dave/discord-kit';
 import { env } from '@dave/config';
+import { getRankingData, formatRankingText, getWeekStart, getDaysUntilWeekEnd } from '../features/central/ranking.js';
+
+// ---------------------------------------------------------------------------
+// injectRankingContent — só para container.type === 'ranking_panel' (seção 26.3)
+//
+// O ranking é conteúdo vivo (recalculado a cada repost, respeitando o cache
+// de Redis de getRankingData) — nunca vem do payload salvo no banco, que só
+// guarda identidade visual (título/cor/topN). Isola essa lógica aqui para não
+// mexer no resto do fluxo de repost.
+// ---------------------------------------------------------------------------
+async function injectRankingContent(
+  payload: RankingPanelPayload,
+  guildInternalId: string,
+): Promise<RankingPanelPayload> {
+  const topN = payload.topN ?? 10;
+  const ranking = await getRankingData(guildInternalId, topN);
+  const rankingText = formatRankingText(ranking);
+  const weekStart = getWeekStart();
+  const daysLeft = getDaysUntilWeekEnd(weekStart);
+
+  const title = payload.title || 'Ranking Semanal de Ações';
+  const body = rankingText ?? '*Nenhuma ação registrada ainda essa semana. Seja o primeiro!*';
+  const updatedAt = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+  const footer = `Atualizado em ${updatedAt} • Reset em ${daysLeft} dia${daysLeft !== 1 ? 's' : ''}`;
+
+  if (payload.renderMode === 'container') {
+    // Prepende um bloco de texto com o conteúdo vivo, preservando quaisquer
+    // blocos de identidade visual configurados pelo admin (banner, etc.).
+    const rankingBlock = {
+      blockType: 'text' as const,
+      content: `## ${title}\n${body}\n\n-# ${footer}`,
+    };
+    return {
+      ...payload,
+      blocks: [rankingBlock, ...(payload.blocks ?? [])],
+    };
+  }
+
+  // Modo embed (default): título/descrição/rodapé do embed.
+  return {
+    ...payload,
+    title,
+    description: body,
+    footerText: footer,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // jobs/container-repost.ts — Gerencia repostagem de Sticky Messages
@@ -91,7 +137,7 @@ export async function handleContainerRepost(data: ContainerRepostJobData): Promi
       let sentMessageId: string;
 
       const isStructured = !discordPayload.content && !discordPayload.embeds;
-      const structuredPayload = isStructured ? (container.payload as any) : null;
+      let structuredPayload = isStructured ? (container.payload as any) : null;
 
       if (isStructured) {
         console.log(`[ContainerRepost] Renderizando ContainerPayload estruturado (tipo: ${container.type}) para formato do Discord API`);
@@ -119,6 +165,13 @@ export async function handleContainerRepost(data: ContainerRepostJobData): Promi
           memberCount: memberCountStr,
           authorName: 'Administração',
         };
+
+        // Painel de ranking: injeta o conteúdo vivo (recalculado a cada repost)
+        // antes de renderizar — nunca lido do payload salvo no banco.
+        if (container.type === 'ranking_panel') {
+          console.log(`[ContainerRepost] Painel de ranking detectado — injetando conteúdo vivo do ranking.`);
+          structuredPayload = await injectRankingContent(structuredPayload as RankingPanelPayload, container.guildId);
+        }
 
         discordPayload = buildContainerDiscordPayload(structuredPayload, placeholdersContext);
       }

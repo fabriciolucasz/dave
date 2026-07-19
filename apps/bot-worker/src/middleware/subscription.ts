@@ -55,7 +55,9 @@ export async function checkSubscription(guildId: string): Promise<SubscriptionCh
     : {
         isActive: false,
         status: 'EXPIRED',
-        planCode: 'free',
+        // Sem plano ativo — não existe mais plano Free (seção 17.1 do PLAN.md).
+        // null indica "sem assinatura", diferente de um plano específico.
+        planCode: null,
         currentPeriodEnd: new Date(0).toISOString(),
       };
 

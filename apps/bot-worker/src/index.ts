@@ -126,7 +126,7 @@ const interactionWorker = new Worker<InteractionJobData>(
 const onboardingWorker = new Worker<GuildOnboardingJobData>(
   QUEUE_NAMES.GUILD_ONBOARDING,
   async (job) => {
-    console.log(`[BotWorker] Processando onboarding da guild: ${job.data.guildName} (job ${job.id})`);
+    console.log(`[BotWorker] Processando onboarding da guild: ${job.data.guildName ?? job.data.guildId} (job ${job.id})`);
     try {
       await handleGuildOnboarding(job.data);
     } catch (error) {

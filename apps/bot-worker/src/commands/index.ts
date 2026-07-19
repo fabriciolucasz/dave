@@ -47,8 +47,9 @@ export async function dispatchCommand(
     return false;
   }
 
-  // Middleware de subscription para comandos premium
-  if (mod.isPremium && interaction.guildId) {
+  // Middleware de subscription: bloqueia o bot inteiro exceto /setup e /assinar
+  const isExcludedCommand = ['setup', 'assinar'].includes(interaction.commandName);
+  if (!isExcludedCommand && interaction.guildId) {
     const sub = await checkSubscription(interaction.guildId);
 
     if (!sub.isActive) {
@@ -56,9 +57,10 @@ export async function dispatchCommand(
       await responder.sendEphemeral({
         embeds: [
           warningEmbed(
-            'Assinatura necessária',
-            'Este comando requer uma assinatura ativa.\n' +
-              'Acesse o dashboard para assinar ou renovar seu plano.',
+            '⏸️ Assinatura Inativa',
+            'Este servidor não possui uma assinatura ativa.\n\n' +
+              '**Boa notícia:** toda a configuração já feita (painéis, itens do baú, cidades cadastradas) está preservada e voltará a funcionar assim que a assinatura for reativada.\n\n' +
+              'Para reativar, use o comando `/assinar`.',
           ),
         ],
       });
@@ -83,6 +85,24 @@ export async function dispatchUserCommand(
     return false;
   }
 
+  if (interaction.guildId) {
+    const sub = await checkSubscription(interaction.guildId);
+    if (!sub.isActive) {
+      const responder = createResponder(interaction as any);
+      await responder.sendEphemeral({
+        embeds: [
+          warningEmbed(
+            '⏸️ Assinatura Inativa',
+            'Este servidor não possui uma assinatura ativa.\n\n' +
+              '**Boa notícia:** toda a configuração já feita está preservada e voltará a funcionar ao reativar.\n\n' +
+              'Para reativar, use o comando `/assinar`.',
+          ),
+        ],
+      });
+      return false;
+    }
+  }
+
   await mod.execute(interaction);
   return true;
 }
@@ -101,6 +121,23 @@ export async function dispatchPrefixCommand(
   const mod = commandRegistry.getPrefix(nameOrAlias);
 
   if (!mod) return false;
+
+  const isExcludedCommand = ['setup', 'assinar'].includes(nameOrAlias);
+  if (!isExcludedCommand && message.guildId) {
+    const sub = await checkSubscription(message.guildId);
+    if (!sub.isActive) {
+      await message.reply({
+        embeds: [
+          warningEmbed(
+            '⏸️ Assinatura Inativa',
+            'Este servidor não possui uma assinatura ativa.\n\n' +
+              '**Boa notícia:** toda a configuração está preservada. Reative com `/assinar`.',
+          ),
+        ],
+      });
+      return false;
+    }
+  }
 
   await mod.execute(message, args);
   return true;

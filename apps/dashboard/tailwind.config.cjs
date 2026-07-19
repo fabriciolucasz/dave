@@ -57,6 +57,11 @@ module.exports = {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      fontFamily: {
+        sans: ["var(--font-geist-sans)", "system-ui", "sans-serif"],
+        display: ["var(--font-barlow-condensed)", "var(--font-geist-sans)", "system-ui", "sans-serif"],
+        mono: ["var(--font-ibm-plex-mono)", "var(--font-geist-mono)", "monospace"],
+      },
       keyframes: {
         "accordion-down": {
           from: { height: "0" },

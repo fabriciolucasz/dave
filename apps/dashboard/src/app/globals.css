@@ -6,28 +6,72 @@
 /* Core Design System para o Dashboard do Dave (Vanilla CSS Premium) */
 
 :root {
-  --background: #0a0b10;
-  --sidebar-bg: #11131c;
-  --panel-bg: rgba(21, 23, 35, 0.6);
-  --panel-hover: rgba(28, 31, 48, 0.7);
-  --accent: #5865f2;
-  --accent-hover: #4752c4;
-  --accent-glow: rgba(88, 101, 242, 0.25);
-  --text-primary: #f2f3f5;
-  --text-secondary: #949ba4;
-  --text-muted: #6e7681;
-  --border: rgba(255, 255, 255, 0.08);
-  --border-focus: rgba(88, 101, 242, 0.5);
-  
-  --success: #23a55a;
-  --success-bg: rgba(35, 165, 90, 0.15);
-  --danger: #da373c;
-  --danger-bg: rgba(218, 55, 60, 0.15);
-  --warning: #f0b232;
-  --warning-bg: rgba(240, 178, 50, 0.15);
-  
+  /*
+   * shadcn/ui design tokens — "dispatch / case-file terminal" palette.
+   * HSL triples (no hsl()/# wrapper) so tailwind.config.cjs's
+   * `hsl(var(--token))` color definitions resolve correctly.
+   */
+  --background: 228 18% 5%; /* #0B0C10 */
+  --foreground: 43 24% 94%; /* #F4F2ED warm off-white */
+
+  --card: 231 14% 10%; /* #15161C */
+  --card-foreground: 43 24% 94%;
+
+  --popover: 231 14% 10%;
+  --popover-foreground: 43 24% 94%;
+
+  --primary: 36 88% 59%; /* #F2A93B amber — dispatch/CTA color */
+  --primary-foreground: 228 20% 7%;
+
+  --secondary: 228 15% 13%; /* #1D1F27 raised surface */
+  --secondary-foreground: 43 24% 94%;
+
+  --muted: 228 15% 13%;
+  --muted-foreground: 43 10% 62%;
+
+  --accent: 228 15% 17%; /* generic hover surface — NOT the teal accent */
+  --accent-foreground: 43 24% 94%;
+
+  --destructive: 358 75% 59%; /* #E5484D */
+  --destructive-foreground: 43 24% 94%;
+
+  --border: 228 14% 19%;
+  --input: 228 14% 19%;
+  --ring: 36 88% 59%;
+
+  --radius: 0.5rem;
+
+  /*
+   * Legacy hand-rolled design-system vars, kept for pages not yet migrated
+   * to shadcn/ui + StatusStamp/NotchedCard. Recolored off Discord blurple
+   * onto the new palette so unmigrated screens don't look inconsistent.
+   */
+  --sidebar-bg: #101119;
+  --panel-bg: rgba(21, 22, 28, 0.6);
+  --panel-hover: rgba(29, 31, 39, 0.7);
+  --accent-hover: #d9922a;
+  --accent-glow: rgba(242, 169, 59, 0.25);
+  --text-primary: #f4f2ed;
+  --text-secondary: #a19c8f;
+  --text-muted: #726d63;
+  --border-focus: rgba(242, 169, 59, 0.5);
+
+  --success: #f2a93b;
+  --success-bg: rgba(242, 169, 59, 0.15);
+  --danger: #e5484d;
+  --danger-bg: rgba(229, 72, 77, 0.15);
+  --warning: #f2a93b;
+  --warning-bg: rgba(242, 169, 59, 0.12);
+
   --font-family: var(--font-geist-sans), Inter, system-ui, sans-serif;
+  --font-display: var(--font-barlow-condensed), var(--font-family);
+  --font-mono-ui: var(--font-ibm-plex-mono), var(--font-geist-mono), monospace;
   --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* NotchedCard signature: a small diagonal notch clipped off the top-right corner */
+.notch-corner {
+  clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%);
 }
 
 * {
@@ -38,7 +82,7 @@
 }
 
 html, body {
-  background: var(--background);
+  background: hsl(var(--background));
   color: var(--text-primary);
   min-height: 100vh;
   width: 100%;
@@ -57,10 +101,10 @@ body {
   height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--background);
+  background: hsl(var(--background));
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: hsl(var(--border));
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
@@ -72,7 +116,7 @@ body {
   background: var(--panel-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   border-radius: 12px;
   padding: 24px;
   transition: var(--transition);
@@ -100,8 +144,8 @@ body {
 }
 
 .btn-primary {
-  background: var(--accent);
-  color: #ffffff;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
 }
 .btn-primary:hover {
   background: var(--accent-hover);
@@ -116,7 +160,7 @@ body {
 .btn-secondary {
   background: transparent;
   color: var(--text-primary);
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
 }
 .btn-secondary:hover {
   background: rgba(255, 255, 255, 0.05);
@@ -154,7 +198,7 @@ body {
 
 .form-control {
   background: rgba(0, 0, 0, 0.2);
-  border: 1px solid var(--border);
+  border: 1px solid hsl(var(--border));
   color: var(--text-primary);
   padding: 12px 16px;
   border-radius: 8px;
